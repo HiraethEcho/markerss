@@ -66,7 +66,9 @@ https://example.com/feed.xml "Display Name" category1 category2
 - Content HTML → markdown → styled terminal text.
 - Headings bold, lists/code blocks rendered, links as **underlined alt text (URL not shown)**.
 - Images shown as `[img]` placeholder.
+- `<sub>`/`<sup>` → `~x~`/`^x^` markdown markers (rendered as subscript/superscript).
 - Export format = the same markdown, written to file on `e`.
+- Help = floating opaque window (default colors), scrollable with `j`/`k`/arrows.
 
 ## Export
 
@@ -92,8 +94,6 @@ https://example.com/feed.xml "Display Name" category1 category2
 |---|---|---|
 | h / q / esc | global | go LEFT: article→list→nav→parent in tree (feed → fold its category) |
 | l / enter | global | go RIGHT: expand tree→list→article→fetch full |
-| F | global | toggle full-screen focus on article pane |
-| Q | global | quit app |
 | j/k | nav | move (live-preview list) |
 | j/k | list | move selection (no read change) |
 | j/k | article | scroll |
@@ -103,10 +103,15 @@ https://example.com/feed.xml "Display Name" category1 category2
 | u | list+article | toggle read/unread |
 | A | list | mark all unread in view read |
 | <c-u>/<c-d> | article | scroll half page |
+| a | nav | add feed (URL → title → category prompts) |
+| d | nav | delete feed (press twice to confirm) |
+| R | nav | rename category |
+| i / x | global | import / export OPML |
+| F | global | toggle full-screen focus on article pane |
 | Q | global | quit app |
 | Tab / Shift+Tab | global | focus next / prev pane |
 | r | global | refresh |
-| ? | global | help |
+| ? | global | help (floating scrollable window) |
 
 ## Out of Scope
 
