@@ -90,20 +90,18 @@ https://example.com/feed.xml "Display Name" category1 category2
 
 | Key | Scope | Action |
 |---|---|---|
-| h/l | nav | collapse/expand |
+| h / q / esc | global | go LEFT: article→list→nav→parent in tree |
+| l / enter | global | go RIGHT: expand tree→list→article→fetch full |
 | j/k | nav | move (live-preview list) |
 | j/k | list | move selection (no read change) |
 | j/k | article | scroll |
 | n/p | article | next/prev item (marks read) |
-| <enter> | nav | open scope |
-| <enter> | list | open article (mark read, focus) |
-| <enter> | article | fetch full content |
 | o | list+article | open in browser |
 | e | list+article | export markdown |
 | u | list+article | toggle read/unread |
 | A | list | mark all unread in view read |
 | <c-u>/<c-d> | article | scroll half page |
-| q | global | back-nav: article→list→nav; quit at nav |
+| Q | global | quit app |
 | Tab / Shift+Tab | global | focus next / prev pane |
 | r | global | refresh |
 | ? | global | help |
