@@ -90,8 +90,9 @@ https://example.com/feed.xml "Display Name" category1 category2
 
 | Key | Scope | Action |
 |---|---|---|
-| h / q / esc | global | go LEFT: article→list→nav→parent in tree |
+| h / q / esc | global | go LEFT: article→list→nav→parent in tree (feed → fold its category) |
 | l / enter | global | go RIGHT: expand tree→list→article→fetch full |
+| F | global | toggle full-screen focus on article pane |
 | j/k | nav | move (live-preview list) |
 | j/k | list | move selection (no read change) |
 | j/k | article | scroll |
