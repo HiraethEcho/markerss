@@ -11,16 +11,16 @@ Three panes:
 │ All Unread (n)       │ 1. item title        │ header:             │
 │ ▸ category           │ 2. item title        │   title             │
 │   feed (12)          │ 3. item title        │   feed · date · url │
-│   feed (0)           │ ...                  │─────────────────────│
-│ ▾ category           │                      │ content:            │
-│   feed (3)           │                      │   summary or full   │
-│ uncategorized feed   │                      │   (scrollable)      │
+│   feed (0)           │ ...                  │   summary           │
+│ ▾ category           │                      │─────────────────────│
+│   feed (3)           │                      │ content:            │
+│ uncategorized feed   │                      │   full content      │
 └──────────────────────┴──────────────────────┴─────────────────────┘
 ```
 
 - Nav: category tree → feeds. Unread count per feed in parens. Uncategorized feeds at root.
 - `All Unread` = virtual node aggregating all feeds, unread-first.
-- Article pane split: header (meta) + content. Header: title, feed name, date, url.
+- Article pane split: header (meta + summary) + content (full content only).
 
 ## Feed Source
 
@@ -40,15 +40,20 @@ https://example.com/feed.xml "Display Name" category1 category2
 State machine per article:
 
 ```
-list nav (preview summary, UNREAD kept)
-  └─ <enter> → mark read + load full content
-       ├─ feed has full content → show it
-       └─ summary-only → fetch full article (HTML→text), cache
+list nav (article pane shows summary in header, UNREAD kept)
+  └─ <enter> → open article in article pane, mark read, load content
+       ├─ feed has full content → content area shows it
+       └─ summary-only → content area empty until <enter> in article pane
+
+article pane: <enter> → try fetch full article (HTML→text, cache)
 ```
 
-- `<enter>` is the only commit point for read state.
+- `<enter>` in list = open + mark read (only commit point).
+- `<enter>` in article pane = ONLY place that fetches full content.
+- Read state fully manual afterwards: `u` toggles read/unread anywhere, no need to enter item.
+- `A` = mark all unread in current view (feed / category / All Unread) as read.
 - Article pane keys: `n/p` next/prev item, `j/k` line scroll, `<c-u>/<c-d>` half-page scroll.
-- List + article panes: `o` open browser, `e` export markdown, `u` mark unread.
+- List + article panes: `o` open browser, `e` export markdown, `u` toggle read.
 - Auto-advance to next unread after finishing.
 
 ## Cache
@@ -60,7 +65,7 @@ list nav (preview summary, UNREAD kept)
 ## Export
 
 - `e` → markdown file: YAML frontmatter (title, link, date, feed) + full content.
-- Filename: title slug. Dir: configurable, default `./out/`.
+- Default dir: `$XDG_DATA_HOME/markerss/<category>/<slug>.md` (category = feed's first tag; uncategorized → `uncategorized`). Configurable.
 
 ## Refresh
 
@@ -68,9 +73,11 @@ list nav (preview summary, UNREAD kept)
 
 ## Paths (XDG)
 
-- Config: `$XDG_CONFIG_HOME/markerss/` (config, feeds file)
-- Cache: `$XDG_CACHE_HOME/markerss/`
-- Data: `$XDG_DATA_HOME/markerss/` (read state, db)
+- Config: `$XDG_CONFIG_HOME/markerss/` — two separate files:
+  - `config` (app settings: cache TTL, export dir, refresh behavior)
+  - `urls` (newsboat-format subscriptions — kept separate from app config)
+- Cache: `$XDG_CACHE_HOME/markerss/` (gzipped fetched articles + metadata)
+- State: `$XDG_STATE_HOME/markerss/` (read-state DB)
 - Fallbacks per XDG spec when vars unset.
 
 ## Keys Summary
@@ -81,16 +88,18 @@ list nav (preview summary, UNREAD kept)
 | j/k | list | move selection |
 | j/k | article | scroll |
 | n/p | article | next/prev item |
-| <enter> | list | open article (mark read, load full) |
+| <enter> | list | open article (mark read, load content) |
+| <enter> | article | fetch full content (summary-only feeds) |
 | o | list+article | open in browser |
 | e | list+article | export markdown |
-| u | list+article | toggle unread |
+| u | list+article | toggle read/unread |
+| A | list | mark all unread in view as read |
 | <c-u>/<c-d> | article | scroll half page |
 | r | global | refresh |
 | q | global | quit |
 | ? | global | help |
 
-## Out of Scope (MVP)
+## Out of Scope
 
 - Sync, accounts, push, daemon
 - Tags / read-later (post-MVP, lower nav strip)
