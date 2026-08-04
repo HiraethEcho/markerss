@@ -65,7 +65,7 @@ article pane: <enter> → try fetch full article (HTML→text, cache)
 ## Export
 
 - `e` → markdown file: YAML frontmatter (title, link, date, feed) + full content.
-- Default dir: `$XDG_DATA_HOME/markerss/<category>/<slug>.md` (category = feed's first tag; uncategorized → `uncategorized`). Configurable.
+- Default dir: `$XDG_DATA_HOME/markerss/<category>/<slug>.md` (category = feed's first tag; uncategorized → direct `markerss/<slug>.md`, no subdir). Configurable.
 
 ## Refresh
 

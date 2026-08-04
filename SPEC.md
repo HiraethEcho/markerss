@@ -11,7 +11,7 @@ TUI RSS reader — browse feeds in terminal; store blog posts as markdown on com
 - Keys: `o` browser / `e` export / `u` toggle-read in list+article panes; `A` mark-all-read; article pane `n/p` next/prev item, `j/k` scroll, `<c-u>/<c-d>` half-page; auto-advance
 - Category CRUD in TUI (create/rename/delete, assign feed); feed CRUD
 - Refresh: auto on startup + `r` manual
-- Export: YAML frontmatter (title/link/date/feed) + full content; default `$XDG_DATA_HOME/markerss/<category>/<slug>.md`; markdown generated only at export time
+- Export: YAML frontmatter (title/link/date/feed) + full content; default `$XDG_DATA_HOME/markerss/<category>/<slug>.md` (uncategorized → `markerss/<slug>.md`); markdown generated only at export time
 - Cache: fetched full articles stored as gzipped raw HTML + metadata; converted to markdown on demand; configurable cleanup TTL
 - Paths: XDG — config (`config` + `urls` files separate) in `$XDG_CONFIG_HOME`, cache in `$XDG_CACHE_HOME`, read-state DB in `$XDG_STATE_HOME`
 - Post-MVP: tags + read-later strip in lower nav pane
