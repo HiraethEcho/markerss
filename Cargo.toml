@@ -1,0 +1,19 @@
+[package]
+name = "markerss"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ratatui = "0.30.2"
+crossterm = "0.29"
+dirs = "6"
+reqwest = { version = "0.13.4", features = ["blocking", "json", "gzip"] }
+feed-rs = "2.4.0"
+serde = "1.0.229"
+chrono = "0.4.45"
+html2md = "0.2.15"
+quick-xml = "0.41.0"
+dom_smoothie = "0.18.0"
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+the-other-tui-markdown = "0.1.0"
+regex = "1.13.1"

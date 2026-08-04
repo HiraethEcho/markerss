@@ -1,0 +1,1119 @@
+//! markerss — TUI RSS reader.
+//!
+//! Three panes: nav tree (categories → feeds) | item list | article.
+//! Storage: SQLite (items + read state). Content: feed HTML → markdown →
+//! styled Text (eilmeldung-style pipeline). Design authority: DESIGN.md.
+
+mod config;
+mod db;
+mod feedlist;
+mod fetch;
+mod model;
+mod opml;
+mod xdg;
+
+use std::io;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread;
+use std::time::Duration;
+
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use model::Item;
+use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
+use ratatui::Frame;
+
+use crate::config::Config;
+use crate::db::Db;
+use crate::feedlist::{Feed, File};
+
+// ─── worker messages ────────────────────────────────────────────────────────
+
+enum Msg {
+    FeedRefreshed { url: String, result: Result<Vec<Item>, String> },
+    ArticleFetched { url: String, guid: String, result: Result<String, String> },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum InputMode {
+    AddUrl,
+    AddTitle,
+    AddCategory,
+    RenameCategory,
+    ImportOpml,
+}
+
+struct InputPrompt {
+    mode: InputMode,
+    prompt: String,
+    buf: String,
+}
+
+// ─── app state ──────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq)]
+enum Scope {
+    AllUnread,
+    Category(String),
+    Feed(String),
+}
+
+struct App {
+    cfg: Config,
+    feeds: File,
+    db: Db,
+
+    // nav tree
+    collapsed: std::collections::HashSet<String>,
+    tree_sel: usize,
+    tree_rows: Vec<TreeRow>,
+
+    // list
+    scope: Scope,
+    list_sel: usize,
+    scoped_items: Vec<(String, Item)>, // (feed_url, item)
+
+    // article
+    article_scroll: u16,
+    fetching: bool,
+
+    focus: usize, // 0 nav, 1 list, 2 article
+    fullscreen: bool,
+    delete_armed: bool,
+    help_scroll: u16,
+    status: String,
+    show_help: bool,
+    pending_refreshes: usize,
+    article_area: Rect,
+    running: bool,
+    input: Option<InputPrompt>,
+    add_pending: Option<String>,
+    add_pending_title: Option<String>,
+    rx: Receiver<Msg>,
+    tx: Sender<Msg>,
+}
+
+#[derive(Debug, Clone)]
+enum TreeRow {
+    AllUnread,
+    Category(String),
+    Feed(String, String), // url, display name
+}
+
+impl App {
+    fn new(cfg: Config) -> App {
+        let feeds = File::load_or_default(&cfg.urls_path);
+        let db = Db::open(&cfg.db_path).expect("open sqlite db");
+        let (tx, rx) = mpsc::channel();
+        let mut app = App {
+            cfg,
+            feeds,
+            db,
+            collapsed: Default::default(),
+            tree_sel: 0,
+            tree_rows: Vec::new(),
+            scope: Scope::AllUnread,
+            list_sel: 0,
+            scoped_items: Vec::new(),
+            article_scroll: 0,
+            fetching: false,
+            focus: 0,
+            fullscreen: false,
+            delete_armed: false,
+            help_scroll: 0,
+            status: String::new(),
+            show_help: false,
+            pending_refreshes: 0,
+            article_area: Rect::default(),
+            running: true,
+            input: None,
+            add_pending: None,
+            add_pending_title: None,
+            rx,
+            tx,
+        };
+        app.rebuild_tree();
+        app.rebuild_list();
+        app
+    }
+
+    // ── tree ──────────────────────────────────────────────────────────────
+
+    fn rebuild_tree(&mut self) {
+        let mut rows = vec![TreeRow::AllUnread];
+        for cat in self.feeds.categories() {
+            rows.push(TreeRow::Category(cat.clone()));
+            if !self.collapsed.contains(&cat) {
+                for f in self.feeds.by_category(&cat) {
+                    rows.push(TreeRow::Feed(f.url.clone(), f.display_name().to_string()));
+                }
+            }
+        }
+        for f in self.feeds.uncategorized() {
+            rows.push(TreeRow::Feed(f.url.clone(), f.display_name().to_string()));
+        }
+        self.tree_rows = rows;
+        if self.tree_sel >= self.tree_rows.len() {
+            self.tree_sel = self.tree_rows.len().saturating_sub(1);
+        }
+    }
+
+    fn select_scope(&mut self, row: &TreeRow) {
+        self.scope = match row {
+            TreeRow::AllUnread => Scope::AllUnread,
+            TreeRow::Category(c) => Scope::Category(c.clone()),
+            TreeRow::Feed(url, _) => Scope::Feed(url.clone()),
+        };
+        self.list_sel = 0;
+        self.rebuild_list();
+        self.focus = 1;
+    }
+
+    /// Follow nav selection into the list pane (preview) without moving focus.
+    fn preview_scope(&mut self) {
+        if let Some(row) = self.tree_rows.get(self.tree_sel).cloned() {
+            self.scope = match row {
+                TreeRow::AllUnread => Scope::AllUnread,
+                TreeRow::Category(c) => Scope::Category(c),
+                TreeRow::Feed(url, _) => Scope::Feed(url),
+            };
+            self.list_sel = 0;
+            self.rebuild_list();
+        }
+    }
+
+    // ── list ──────────────────────────────────────────────────────────────
+
+    fn rebuild_list(&mut self) {
+        let mut items: Vec<(String, Item)> = Vec::new();
+        let feed_urls: Vec<String> = match &self.scope {
+            Scope::AllUnread => self.feeds.feeds.iter().map(|f| f.url.clone()).collect(),
+            Scope::Category(cat) => self
+                .feeds
+                .by_category(cat)
+                .iter()
+                .map(|f| f.url.clone())
+                .collect(),
+            Scope::Feed(url) => vec![url.clone()],
+        };
+        for url in feed_urls {
+            if let Ok(list) = self.db.items_for_feed(&url) {
+                for i in list {
+                    items.push((url.clone(), i));
+                }
+            }
+        }
+        // unread first, then date desc
+        items.sort_by(|a, b| {
+            let ar = self.db.is_read(&a.0, &a.1.guid).unwrap_or(false);
+            let br = self.db.is_read(&b.0, &b.1.guid).unwrap_or(false);
+            ar.cmp(&br).then_with(|| b.1.date.cmp(&a.1.date))
+        });
+        self.scoped_items = items;
+        if self.list_sel >= self.scoped_items.len() {
+            self.list_sel = self.scoped_items.len().saturating_sub(1);
+        }
+    }
+
+    fn select_item(&mut self, idx: usize) {
+        if idx >= self.scoped_items.len() {
+            return;
+        }
+        self.list_sel = idx;
+        self.article_scroll = 0;
+    }
+
+    fn open_item(&mut self) {
+        let Some((url, item)) = self.scoped_items.get(self.list_sel).cloned() else {
+            return;
+        };
+        self.db.set_read(&url, &item.guid, true).ok();
+        self.focus = 2;
+        self.article_scroll = 0;
+        self.rebuild_list();
+        // summary-only until opened — fetch full content only on explicit
+        // <enter> in the article pane
+        if item.content.trim().is_empty() {
+            self.status = "summary only — press enter to fetch full article".into();
+        }
+    }
+
+    fn current_item(&self) -> Option<(String, Item)> {
+        self.scoped_items.get(self.list_sel).cloned()
+    }
+
+    /// Display body markdown: content only (summary lives in the header).
+    fn article_markdown_display(&self, item: &Item) -> String {
+        if !item.content.trim().is_empty() {
+            fetch::html_to_markdown(&item.content)
+        } else {
+            String::new()
+        }
+    }
+
+    /// Export body markdown: content, falling back to summary.
+    fn article_markdown_export(&self, item: &Item) -> String {
+        if !item.content.trim().is_empty() {
+            fetch::html_to_markdown(&item.content)
+        } else {
+            item.summary.clone()
+        }
+    }
+
+    fn fetch_article(&mut self) {
+        let Some((_, item)) = self.current_item() else { return };
+        if !item.content.trim().is_empty() {
+            self.status = "feed already provides full content".into();
+            return;
+        }
+        if item.url.is_empty() {
+            self.status = "no url to fetch".into();
+            return;
+        }
+        if self.fetching {
+            return;
+        }
+        self.fetching = true;
+        self.status = format!("fetching {}", item.url);
+        let tx = self.tx.clone();
+        let url = item.url.clone();
+        let guid = item.guid.clone();
+        thread::spawn(move || {
+            let result = fetch::fetch_article(&url);
+            tx.send(Msg::ArticleFetched { url, guid, result }).ok();
+        });
+    }
+
+    // ── feed/category CRUD (rewrites urls file) ────────────────────────
+
+    fn save_urls(&mut self) {
+        if let Err(e) = self.feeds.save(&self.cfg.urls_path) {
+            self.status = format!("urls save failed: {e}");
+        }
+    }
+
+    fn start_input(&mut self, mode: InputMode) {
+        let prompt = match &mode {
+            InputMode::AddUrl => "feed URL:".to_string(),
+            InputMode::AddTitle => "display title (empty = none):".to_string(),
+            InputMode::AddCategory => "category (space-separated, empty = none):".to_string(),
+            InputMode::RenameCategory => "new category name:".to_string(),
+            InputMode::ImportOpml => "OPML file path:".to_string(),
+        };
+        self.input = Some(InputPrompt { mode, prompt, buf: String::new() });
+    }
+
+    fn submit_input(&mut self) {
+        let Some(prompt) = self.input.take() else { return };
+        let val = prompt.buf.trim().to_string();
+        match prompt.mode {
+            InputMode::AddUrl => {
+                if val.is_empty() {
+                    self.status = "add feed cancelled (empty url)".into();
+                    return;
+                }
+                self.add_pending = Some(val);
+                self.start_input(InputMode::AddTitle);
+            }
+            InputMode::AddTitle => {
+                let url = self.add_pending.take().unwrap_or_default();
+                if url.is_empty() {
+                    return;
+                }
+                self.add_pending = Some(url);
+                self.add_pending_title = if val.is_empty() { None } else { Some(val) };
+                self.start_input(InputMode::AddCategory);
+            }
+            InputMode::AddCategory => {
+                let url = self.add_pending.take().unwrap_or_default();
+                let title = self.add_pending_title.take();
+                let tags: Vec<String> = val.split_whitespace().map(str::to_string).collect();
+                let feed = Feed {
+                    url: url.clone(),
+                    title,
+                    custom_name: false,
+                    tags,
+                };
+                self.feeds.upsert(feed);
+                self.save_urls();
+                self.rebuild_tree();
+                self.status = format!("added {url}");
+                self.refresh_feed_thread(url);
+            }
+            InputMode::RenameCategory => {
+                if val.is_empty() {
+                    self.status = "rename cancelled".into();
+                    return;
+                }
+                if let Some(TreeRow::Category(old)) = self.tree_rows.get(self.tree_sel) {
+                    let old = old.clone();
+                    for f in self.feeds.feeds.iter_mut() {
+                        if f.category() == Some(old.as_str()) {
+                            f.tags[0] = val.clone();
+                        }
+                    }
+                    self.save_urls();
+                    self.rebuild_tree();
+                    self.status = format!("category {old} → {val}");
+                }
+            }
+            InputMode::ImportOpml => {
+                if val.is_empty() {
+                    self.status = "import cancelled".into();
+                    return;
+                }
+                match std::fs::read_to_string(&val) {
+                    Ok(xml) => match opml::import_opml(&xml) {
+                        Ok(feeds) => {
+                            let n = feeds.len();
+                            for f in feeds {
+                                self.feeds.upsert(f);
+                            }
+                            self.save_urls();
+                            self.rebuild_tree();
+                            self.status = format!("imported {n} feeds from {val}");
+                        }
+                        Err(e) => self.status = format!("OPML parse failed: {e}"),
+                    },
+                    Err(e) => self.status = format!("read failed: {e}"),
+                }
+            }
+        }
+    }
+
+    fn delete_selected_feed(&mut self) {
+        if let Some(TreeRow::Feed(url, name)) = self.tree_rows.get(self.tree_sel).cloned() {
+            self.feeds.remove(&url);
+            self.save_urls();
+            self.rebuild_tree();
+            self.status = format!("removed {name}");
+            if self.scope == Scope::Feed(url) {
+                self.scope = Scope::AllUnread;
+                self.rebuild_list();
+            }
+        }
+    }
+
+    fn export_opml(&mut self) {
+        let path = self.cfg.config_dir.join("feeds.opml");
+        match std::fs::write(&path, opml::export_opml(&self.feeds)) {
+            Ok(_) => self.status = format!("OPML exported to {}", path.display()),
+            Err(e) => self.status = format!("OPML export failed: {e}"),
+        }
+    }
+
+    // ── refresh ───────────────────────────────────────────────────────────
+
+    fn refresh_feed_thread(&mut self, url: String) {
+        self.pending_refreshes += 1;
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let result = fetch::refresh_feed(&url);
+            tx.send(Msg::FeedRefreshed { url, result }).ok();
+        });
+    }
+
+    fn refresh_all(&mut self) {
+        if self.pending_refreshes > 0 {
+            return;
+        }
+        let urls: Vec<String> = self.feeds.feeds.iter().map(|f| f.url.clone()).collect();
+        if urls.is_empty() {
+            self.status = "no feeds — add subscriptions to the urls file".into();
+            return;
+        }
+        self.status = format!("refreshing {} feeds…", urls.len());
+        for url in urls {
+            self.refresh_feed_thread(url);
+        }
+    }
+
+    fn handle_feed_refreshed(&mut self, url: String, result: Result<Vec<Item>, String>) {
+        self.pending_refreshes = self.pending_refreshes.saturating_sub(1);
+        match result {
+            Ok(items) => {
+                self.db.replace_feed_items_preserving_read(&url, &items).ok();
+                self.status = format!("refreshed {url} ({} items)", items.len());
+            }
+            Err(e) => self.status = e,
+        }
+        if self.pending_refreshes == 0 {
+            self.status.push_str(" — done");
+        }
+        self.rebuild_list();
+    }
+
+    fn handle_article_fetched(&mut self, url: String, guid: String, result: Result<String, String>) {
+        self.fetching = false;
+        match result {
+            Ok(html) => {
+                let (feed_url, _) = match self.current_item() {
+                    Some(ci) => ci,
+                    None => (String::new(), Item {
+                        guid: String::new(),
+                        title: String::new(),
+                        url: String::new(),
+                        summary: String::new(),
+                        content: String::new(),
+                        date: String::new(),
+                    }),
+                };
+                self.db.update_item_content(&feed_url, &guid, &html).ok();
+                self.status = format!("fetched {} ({} chars)", url, html.len());
+            }
+            Err(e) => {
+                self.status = format!("fetch failed: {e}");
+            }
+        }
+        self.rebuild_list();
+    }
+
+    // ── actions ───────────────────────────────────────────────────────────
+
+    fn mark_all_read(&mut self) {
+        let urls: Vec<String> = match &self.scope {
+            Scope::AllUnread => self.feeds.feeds.iter().map(|f| f.url.clone()).collect(),
+            Scope::Category(cat) => self
+                .feeds
+                .by_category(cat)
+                .iter()
+                .map(|f| f.url.clone())
+                .collect(),
+            Scope::Feed(url) => vec![url.clone()],
+        };
+        for u in urls {
+            self.db.mark_all_read(&u).ok();
+        }
+        self.rebuild_list();
+        self.status = "marked all read".into();
+    }
+
+    fn toggle_read(&mut self) {
+        let Some((url, item)) = self.current_item() else { return };
+        self.db.toggle_read(&url, &item.guid).ok();
+        self.rebuild_list();
+    }
+
+    fn open_browser(&mut self) {
+        let Some((_, item)) = self.current_item() else { return };
+        if item.url.is_empty() {
+            self.status = "no url".into();
+            return;
+        }
+        let _ = std::process::Command::new("xdg-open")
+            .arg(&item.url)
+            .spawn()
+            .map_err(|e| {
+                self.status = format!("xdg-open failed: {e}");
+            });
+        self.status = format!("opened {}", item.url);
+    }
+
+    fn export_markdown(&mut self) -> io::Result<()> {
+        let Some((feed_url, item)) = self.current_item() else {
+            return Ok(());
+        };
+        let feed = self.feeds.feeds.iter().find(|f| f.url == feed_url);
+        let category = feed.and_then(|f| f.category()).unwrap_or("");
+        let body = self.article_markdown_export(&item);
+
+        let mut md = String::new();
+        md.push_str(&format!("---\ntitle: \"{}\"\n", escape_yaml(&item.title)));
+        md.push_str(&format!("link: {}\n", item.url));
+        if !item.date.is_empty() {
+            md.push_str(&format!("date: {}\n", item.date));
+        }
+        if let Some(f) = feed {
+            md.push_str(&format!("feed: \"{}\"\n", escape_yaml(f.display_name())));
+        }
+        md.push_str("---\n\n");
+        md.push_str(&body);
+        md.push('\n');
+
+        let slug = slugify(&item.title);
+        let dir = if category.is_empty() {
+            self.cfg.export_dir.clone()
+        } else {
+            self.cfg.export_dir.join(category)
+        };
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join(format!("{slug}.md"));
+        std::fs::write(&path, md)?;
+        self.status = format!("exported {}", path.display());
+        Ok(())
+    }
+
+    fn next_prev_item(&mut self, delta: isize) {
+        if self.scoped_items.is_empty() {
+            return;
+        }
+        let n = self.scoped_items.len() as isize;
+        let mut idx = self.list_sel as isize + delta;
+        if idx < 0 {
+            idx = 0;
+        }
+        if idx >= n {
+            idx = n - 1;
+        }
+        self.select_item(idx as usize);
+        // in the article pane, showing content marks it read
+        if self.focus == 2 {
+            if let Some((url, item)) = self.current_item() {
+                self.db.set_read(&url, &item.guid, true).ok();
+                self.rebuild_list();
+            }
+        }
+    }
+
+    // ── keys ──────────────────────────────────────────────────────────────
+
+    fn on_key(&mut self, key: KeyCode, mods: KeyModifiers) {
+        if self.show_help {
+            match key {
+                KeyCode::Char('?') | KeyCode::Char('q') | KeyCode::Esc => self.show_help = false,
+                KeyCode::Char('j') | KeyCode::Down => self.help_scroll += 1,
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.help_scroll = self.help_scroll.saturating_sub(1)
+                }
+                _ => {}
+            }
+            return;
+        }
+        if let Some(prompt) = self.input.as_mut() {
+            match key {
+                KeyCode::Esc => self.input = None,
+                KeyCode::Enter => self.submit_input(),
+                KeyCode::Backspace => {
+                    prompt.buf.pop();
+                }
+                KeyCode::Char(c) => prompt.buf.push(c),
+                _ => {}
+            }
+            return;
+        }
+        // ctrl+u / ctrl+d belong to the article pane (half-page scroll)
+        if mods.contains(KeyModifiers::CONTROL) {
+            if self.focus == 2 {
+                self.article_scroll_ctrl(key);
+            }
+            return;
+        }
+        // any key other than d disarms the delete-confirm
+        if key != KeyCode::Char('d') {
+            self.delete_armed = false;
+        }
+        match key {
+            // left: h / q / esc — article→list→nav→parent in tree
+            KeyCode::Char('h') | KeyCode::Char('q') | KeyCode::Esc => self.go_left(),
+            // right: l / enter — expand tree→list→article→fetch full
+            KeyCode::Char('l') | KeyCode::Enter => self.go_right(),
+            KeyCode::Char('Q') => self.running = false,
+            KeyCode::Char('F') => {
+                self.focus = 2;
+                self.fullscreen = !self.fullscreen;
+            }
+            KeyCode::Char('?') => self.show_help = true,
+            KeyCode::Char('r') => self.refresh_all(),
+            KeyCode::Char('A') => self.mark_all_read(),
+            KeyCode::Char('e') => {
+                if let Err(e) = self.export_markdown() {
+                    self.status = format!("export failed: {e}");
+                }
+            }
+            KeyCode::Char('o') => self.open_browser(),
+            KeyCode::Char('u') => self.toggle_read(),
+            KeyCode::Tab => self.focus = (self.focus + 1) % 3,
+            KeyCode::BackTab => self.focus = (self.focus + 2) % 3,
+            KeyCode::Char('a') if self.focus == 0 => self.start_input(InputMode::AddUrl),
+            KeyCode::Char('d') if self.focus == 0 => {
+                if self.delete_armed {
+                    self.delete_armed = false;
+                    self.delete_selected_feed();
+                } else {
+                    self.delete_armed = true;
+                    let name = self
+                        .tree_rows
+                        .get(self.tree_sel)
+                        .map(|r| match r {
+                            TreeRow::Feed(_, n) => n.clone(),
+                            _ => String::new(),
+                        })
+                        .unwrap_or_default();
+                    self.status = format!("press d again to delete {name}");
+                }
+            }
+            KeyCode::Char('R') if self.focus == 0 => self.start_input(InputMode::RenameCategory),
+            KeyCode::Char('i') => self.start_input(InputMode::ImportOpml),
+            KeyCode::Char('x') => self.export_opml(),
+            _ => match self.focus {
+                0 => self.nav_key(key),
+                1 => self.list_key(key),
+                2 => self.article_key(key),
+                _ => {}
+            },
+        }
+    }
+
+    /// Left: article→list→nav→parent in file tree.
+    fn go_left(&mut self) {
+        match self.focus {
+            2 => {
+                if self.fullscreen {
+                    self.fullscreen = false;
+                }
+                self.focus = 1;
+            }
+            1 => self.focus = 0,
+            _ => self.nav_left(),
+        }
+    }
+
+    /// Right: expand tree→list→article→fetch full.
+    fn go_right(&mut self) {
+        match self.focus {
+            0 => self.nav_right(),
+            1 => self.open_item(),
+            _ => self.fetch_article(),
+        }
+    }
+
+    /// Nav left: feed → fold its parent category; expanded category →
+    /// collapse; collapsed category / All Unread → All Unread (root).
+    fn nav_left(&mut self) {
+        match self.tree_rows.get(self.tree_sel).cloned() {
+            Some(TreeRow::Feed(url, _)) => {
+                let cat = self
+                    .feeds
+                    .feeds
+                    .iter()
+                    .find(|f| f.url == url)
+                    .and_then(|f| f.category())
+                    .map(str::to_string);
+                if let Some(c) = cat {
+                    self.collapsed.insert(c.clone());
+                    self.rebuild_tree();
+                    if let Some(idx) = self
+                        .tree_rows
+                        .iter()
+                        .position(|r| matches!(r, TreeRow::Category(x) if *x == c))
+                    {
+                        self.tree_sel = idx;
+                    }
+                } else {
+                    self.tree_sel = 0;
+                }
+            }
+            Some(TreeRow::Category(cat)) => {
+                if self.collapsed.contains(&cat) {
+                    self.tree_sel = 0;
+                } else {
+                    self.collapsed.insert(cat);
+                    self.rebuild_tree();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Nav right: collapsed category → expand; else descend into scope.
+    fn nav_right(&mut self) {
+        match self.tree_rows.get(self.tree_sel).cloned() {
+            Some(TreeRow::Category(cat)) if self.collapsed.contains(&cat) => {
+                self.collapsed.remove(&cat);
+                self.rebuild_tree();
+            }
+            Some(row) => self.select_scope(&row),
+            None => {}
+        }
+    }
+
+    fn nav_key(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Char('j') | KeyCode::Down => {
+                if self.tree_sel + 1 < self.tree_rows.len() {
+                    self.tree_sel += 1;
+                    self.preview_scope();
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.tree_sel = self.tree_sel.saturating_sub(1);
+                self.preview_scope();
+            }
+            _ => {}
+        }
+    }
+
+    fn list_key(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Char('j') | KeyCode::Down => {
+                if self.list_sel + 1 < self.scoped_items.len() {
+                    self.list_sel += 1;
+                    self.article_scroll = 0;
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.list_sel = self.list_sel.saturating_sub(1);
+                self.article_scroll = 0;
+            }
+            _ => {}
+        }
+    }
+
+    fn article_key(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Char('j') | KeyCode::Down => self.article_scroll += 1,
+            KeyCode::Char('k') | KeyCode::Up => self.article_scroll = self.article_scroll.saturating_sub(1),
+            KeyCode::Char('n') | KeyCode::PageDown => self.next_prev_item(1),
+            KeyCode::Char('p') | KeyCode::PageUp => self.next_prev_item(-1),
+            _ => {}
+        }
+    }
+
+    fn article_scroll_ctrl(&mut self, key: KeyCode) {
+        let half = (self.article_area.height.saturating_sub(4) / 2).max(1);
+        match key {
+            KeyCode::Char('u') => self.article_scroll = self.article_scroll.saturating_sub(half),
+            KeyCode::Char('d') => self.article_scroll += half,
+            _ => {}
+        }
+    }
+}
+
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+fn escape_yaml(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn slugify(title: &str) -> String {
+    let mut out = String::new();
+    for c in title.chars() {
+        if c.is_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+        } else if c.is_whitespace() || c == '-' || c == '_' {
+            out.push('-');
+        }
+    }
+    while out.contains("--") {
+        out = out.replace("--", "-");
+    }
+    let out = out.trim_matches('-');
+    if out.is_empty() {
+        "untitled".to_string()
+    } else {
+        out.to_string()
+    }
+}
+
+fn fmt_date(iso: &str) -> String {
+    iso.chars().take(10).collect()
+}
+
+// ─── rendering ──────────────────────────────────────────────────────────────
+
+fn render(frame: &mut Frame, app: &mut App) {
+    let [main, status_bar] = Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(frame.area());
+    if app.fullscreen {
+        // full-screen focus on the article pane
+        app.article_area = main;
+        draw_article(frame, main, app);
+        draw_status(frame, status_bar, app);
+        if app.show_help {
+            draw_help(frame, frame.area(), app);
+        }
+        if let Some(prompt) = &app.input {
+            draw_input(frame, frame.area(), prompt);
+        }
+        return;
+    }
+    let [nav, list, article] = Layout::horizontal([
+        Constraint::Percentage(15),
+        Constraint::Percentage(15),
+        Constraint::Percentage(70),
+    ])
+    .areas(main);
+    app.article_area = article;
+
+    draw_nav(frame, nav, app);
+    draw_list(frame, list, app);
+    draw_article(frame, article, app);
+    draw_status(frame, status_bar, app);
+
+    if app.show_help {
+        draw_help(frame, frame.area(), app);
+    }
+    if let Some(prompt) = &app.input {
+        draw_input(frame, frame.area(), prompt);
+    }
+}
+
+fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
+    let mut items: Vec<ListItem> = Vec::new();
+    for (i, row) in app.tree_rows.iter().enumerate() {
+        let (text, style) = match row {
+            TreeRow::AllUnread => {
+                let n = app.db.total_unread().unwrap_or(0);
+                (
+                    format!("All Unread ({n})"),
+                    Style::default().add_modifier(Modifier::BOLD),
+                )
+            }
+            TreeRow::Category(cat) => {
+                let n: usize = app
+                    .feeds
+                    .by_category(cat)
+                    .iter()
+                    .map(|f| app.db.unread_count(&f.url).unwrap_or(0))
+                    .sum();
+                let prefix = if app.collapsed.contains(cat) { "▸" } else { "▾" };
+                (format!("{prefix} {cat} ({n})"), Style::default())
+            }
+            TreeRow::Feed(url, name) => {
+                let n = app.db.unread_count(url).unwrap_or(0);
+                (format!("  {name} ({n})"), Style::default())
+            }
+        };
+        let item = ListItem::new(text);
+        // patch selection into the row style so base styles (bold etc.) survive
+        let row_style = if i == app.tree_sel {
+            if app.focus == 0 {
+                Style::default().bg(Color::DarkGray).fg(Color::White)
+            } else {
+                Style::default().fg(Color::Yellow)
+            }
+        } else {
+            Style::default()
+        };
+        items.push(item.style(style.patch(row_style)));
+    }
+    frame.render_widget(
+        List::new(items).block(pane_block("Nav", app.focus == 0)),
+        area,
+    );
+}
+
+fn draw_list(frame: &mut Frame, area: Rect, app: &App) {
+    let mut items: Vec<ListItem> = Vec::new();
+    if app.scoped_items.is_empty() {
+        items.push(ListItem::new("no items — r to refresh"));
+    }
+    for (i, (url, item)) in app.scoped_items.iter().enumerate() {
+        let read = app.db.is_read(url, &item.guid).unwrap_or(false);
+        let marker = if read { " " } else { "•" };
+        let text = format!("{marker} {}", item.display_title());
+        let mut li = ListItem::new(text);
+        if i == app.list_sel {
+            let style = if app.focus == 1 {
+                Style::default().bg(Color::DarkGray).fg(Color::White)
+            } else {
+                Style::default().fg(Color::Yellow)
+            };
+            li = li.style(style);
+        } else if read {
+            li = li.style(Style::default().fg(Color::DarkGray));
+        }
+        items.push(li);
+    }
+    let title = match &app.scope {
+        Scope::AllUnread => "All Unread".to_string(),
+        Scope::Category(c) => c.clone(),
+        Scope::Feed(u) => app
+            .feeds
+            .feeds
+            .iter()
+            .find(|f| &f.url == u)
+            .map(|f| f.display_name().to_string())
+            .unwrap_or_else(|| u.clone()),
+    };
+    frame.render_widget(
+        List::new(items).block(pane_block(&title, app.focus == 1)),
+        area,
+    );
+}
+
+fn draw_article(frame: &mut Frame, area: Rect, app: &App) {
+    let Some((url, item)) = app.current_item() else {
+        frame.render_widget(
+            Paragraph::new("select an article")
+                .block(pane_block("Article", app.focus == 2)),
+            area,
+        );
+        return;
+    };
+    let feed_name = app
+        .feeds
+        .feeds
+        .iter()
+        .find(|f| f.url.as_str() == url.as_str())
+        .map(|f| f.display_name().to_string())
+        .unwrap_or_default();
+
+    let content_ready = !item.content.trim().is_empty() || !item.summary.trim().is_empty();
+    let fetching_hint = if app.fetching { " (fetching…)" } else { "" };
+
+    // Fixed header (title/meta/summary), content scrolls below a separator.
+    let block = pane_block("Article", app.focus == 2);
+    let inner = block.inner(area);
+    let [head, sep, body] = Layout::vertical([
+        Constraint::Length(6),
+        Constraint::Length(1),
+        Constraint::Min(0),
+    ])
+    .areas(inner);
+
+    let title_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+    let meta_style = Style::default().fg(Color::Cyan);
+    let dim_style = Style::default().fg(Color::DarkGray);
+    let read_mark = if app.db.is_read(&url, &item.guid).unwrap_or(false) {
+        "read"
+    } else {
+        "unread"
+    };
+
+    let header_text = Text::from(vec![
+        Line::from(Span::styled(item.display_title(), title_style)),
+        Line::from(Span::styled(
+            format!("{feed_name}  ·  {}  ·  {read_mark}", fmt_date(&item.date)),
+            meta_style,
+        )),
+        Line::from(Span::styled(item.url.clone(), dim_style)),
+        Line::from(""),
+        Line::from(Span::styled(item.summary.trim(), Style::default())),
+    ]);
+    frame.render_widget(Paragraph::new(header_text).wrap(Wrap { trim: true }), head);
+
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            "─".repeat(sep.width as usize),
+            Style::default().fg(Color::DarkGray),
+        )),
+        sep,
+    );
+
+    // Body: feed/fetched HTML → markdown → styled ratatui Text
+    // (eilmeldung-style pipeline: html2md + the_other_tui_markdown).
+    // Links render as underlined alt text (no URL); images as [img].
+    let body_text = if content_ready {
+        let md = app.article_markdown_display(&item);
+        if md.trim().is_empty() {
+            Text::from(format!("[summary only — press enter to fetch full article{fetching_hint}]"))
+        } else {
+            let link_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::UNDERLINED);
+            let img_style = Style::default().fg(Color::DarkGray);
+            let renderer = the_other_tui_markdown::RendererBuilder::new()
+                .with_link(move |alt, _url| {
+                    vec![Span::styled(alt.to_string(), link_style)]
+                })
+                .with_image(move |_alt, _url| {
+                    vec![Span::styled("[img]", img_style)]
+                })
+                .build();
+            the_other_tui_markdown::into_text_with_renderer(&md, &renderer)
+        }
+    } else {
+        Text::from(format!("[summary only — press enter to fetch full article{fetching_hint}]"))
+    };
+    let para = Paragraph::new(body_text)
+        .wrap(Wrap { trim: true })
+        .scroll((app.article_scroll, 0));
+    frame.render_widget(para, body);
+
+    frame.render_widget(block, area);
+}
+
+fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
+    let line = format!(
+        "{}  |  ? help  q quit  tab focus  j/k move  enter open  o browser  e export  u read  A all-read  r refresh",
+        app.status
+    );
+    frame.render_widget(Paragraph::new(line), area);
+}
+
+fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
+    let text = Text::from(
+        "Keys\n\
+         ─────\n\
+         nav:   j/k move · h/l expand/collapse+descend · a add feed · d delete · R rename category\n\
+         list:  j/k move · l/enter open (mark read)\n\
+         article: j/k scroll · n/p item · ctrl+u/ctrl+d half page · l/enter fetch full\n\
+         left:  h/q/esc — article→list→nav→parent\n\
+         right: l/enter — expand→list→article→fetch\n\
+         global: o browser · e export · u toggle read · A mark all read\n\
+         r refresh · i import OPML · x export OPML · tab focus · F fullscreen · Q quit · ? help\n\n\
+         export → $XDG_DATA_HOME/markerss/<category>/<slug>.md",
+    );
+    // floating opaque window, default colors, scrollable with j/k
+    let w = (area.width * 3 / 4).max(40);
+    let h = (area.height * 3 / 4).max(10);
+    let rect = Rect {
+        x: area.x + (area.width - w) / 2,
+        y: area.y + (area.height - h) / 2,
+        width: w,
+        height: h,
+    };
+    let block = Block::default().borders(Borders::ALL).title("Help");
+    frame.render_widget(ratatui::widgets::Clear, rect);
+    frame.render_widget(
+        Paragraph::new(text).block(block).scroll((app.help_scroll, 0)),
+        rect,
+    );
+}
+
+fn draw_input(frame: &mut Frame, area: Rect, prompt: &InputPrompt) {
+    let text = Text::from(format!("{} {}", prompt.prompt, prompt.buf));
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("input (esc cancel)")
+        .style(Style::default().bg(Color::Blue));
+    let box_rect = Rect {
+        x: area.x + area.width / 4,
+        y: area.y + area.height / 2,
+        width: area.width / 2,
+        height: 3,
+    };
+    frame.render_widget(ratatui::widgets::Clear, box_rect);
+    frame.render_widget(Paragraph::new(text).block(block), box_rect);
+}
+
+fn pane_block<'a>(title: &'a str, focused: bool) -> Block<'a> {
+    let color = if focused { Color::Yellow } else { Color::DarkGray };
+    Block::bordered().title(title).border_style(Style::default().fg(color))
+}
+
+// ─── main loop ──────────────────────────────────────────────────────────────
+
+fn main() -> io::Result<()> {
+    let cfg = Config::load();
+    let mut app = App::new(cfg);
+    app.db.cleanup_content(app.cfg.cache_ttl_days).ok();
+    app.refresh_all();
+
+    let mut terminal = ratatui::init();
+    let result = run(&mut terminal, &mut app);
+    ratatui::restore();
+    result
+}
+
+fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()> {
+    while app.running {
+        terminal.draw(|f| render(f, app))?;
+        if event::poll(Duration::from_millis(100))? {
+            if let Event::Key(k) = event::read()? {
+                if k.kind == KeyEventKind::Press {
+                    app.on_key(k.code, k.modifiers);
+                }
+            }
+        }
+        while let Ok(msg) = app.rx.try_recv() {
+            match msg {
+                Msg::FeedRefreshed { url, result } => app.handle_feed_refreshed(url, result),
+                Msg::ArticleFetched { url, guid, result } => {
+                    app.handle_article_fetched(url, guid, result)
+                }
+            }
+        }
+    }
+    Ok(())
+}
