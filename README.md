@@ -4,14 +4,14 @@ TUI RSS reader — browse feeds in the terminal, store blog posts as markdown on
 
 ## Repo Layout
 
-`main` is design-only (sdd-lite): [SPEC.md](SPEC.md) (intent), [PLAN.md](PLAN.md) (roadmap), [DESIGN.md](DESIGN.md) (TUI design). Three parallel specs — **MVP**, **Config**, **Tags & Favorites** — each a `##` section in all three docs.
+`main` is design-only (sdd-lite): [SPEC.md](SPEC.md) (intent), [PLAN.md](PLAN.md) (roadmap), [DESIGN.md](DESIGN.md) (TUI design). Five parallel specs — **MVP**, **Config**, **Tags & Favorites**, **Article Polish**, **Advanced** — each a `##` section in all three docs.
 
 Implementation lives in parallel worktrees, one per language (full sdd):
 - `rust` → `../markerss-rust` (Rust + ratatui + feed-rs)
 - `go` → `../markerss-go` (Go + bubbletea + gofeed)
 - `cpp` → `../markerss-cpp` (C++ + FTXUI + libcurl)
 
-Each branch rebases on main and implements all three specs, in order MVP → Config → Tags & Favorites.
+Each branch rebases on main and implements all five specs, in order MVP → Config → Tags & Favorites → Article Polish → Advanced.
 
 ## Usage
 
