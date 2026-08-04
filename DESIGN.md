@@ -56,16 +56,27 @@ article pane: <enter> → try fetch full article (HTML→text, cache)
 - List + article panes: `o` open browser, `e` export markdown, `u` toggle read.
 - Auto-advance to next unread after finishing.
 
-## Cache
+## Storage (SQLite)
 
-- Fetched full articles: gzipped raw HTML + metadata (url, fetched_at, title, feed_id).
-- Markdown conversion happens ONLY at export time, never stored.
-- Configurable cleanup TTL (age-based purge on startup).
+- `$XDG_STATE_HOME/markerss/markerss.db` (rusqlite, bundled) — items + content + read flags
+- Items keyed `(feed_url, guid)`; read flag preserved across refresh
+- Fetched article content (readability-extracted HTML) stored in `items.content`
+- Markdown generated ONLY at export time, never stored
+- Configurable TTL: startup purge of fetched content older than `cache_ttl_days`
+- Subscriptions stay in `urls` file (newsboat format) — DB holds items only
+
+## Rendering (eilmeldung-style pipeline)
+
+- Feed/fetched content (HTML) → markdown (`html2md`) → styled ratatui `Text`
+  (`the_other_tui_markdown`) — headings bold, lists/code blocks, link hints
+- Full-article fetch: Mozilla Readability (`dom_smoothie`) extracts main content,
+  fallback to whole page
+- Markdown (export format) = same html2md output, written on `e`
 
 ## Export
 
 - `e` → markdown file: YAML frontmatter (title, link, date, feed) + full content.
-- Default dir: `$XDG_DATA_HOME/markerss/<category>/<slug>.md` (category = feed's first tag; uncategorized → direct `markerss/<slug>.md`, no subdir). Configurable.
+- Default dir: `$XDG_DATA_HOME/markerss/<category>/<slug>.md` (uncategorized → root). Configurable.
 
 ## Refresh
 
@@ -76,8 +87,8 @@ article pane: <enter> → try fetch full article (HTML→text, cache)
 - Config: `$XDG_CONFIG_HOME/markerss/` — two separate files:
   - `config` (app settings: cache TTL, export dir, refresh behavior)
   - `urls` (newsboat-format subscriptions — kept separate from app config)
-- Cache: `$XDG_CACHE_HOME/markerss/` (gzipped fetched articles + metadata)
-- State: `$XDG_STATE_HOME/markerss/` (read-state DB)
+- State: `$XDG_STATE_HOME/markerss/markerss.db` (SQLite: items + read flags)
+- Export: `$XDG_DATA_HOME/markerss/<category>/<slug>.md` (category = feed's first tag; uncategorized → direct `markerss/<slug>.md`, no subdir). Configurable.
 - Fallbacks per XDG spec when vars unset.
 
 ## Keys Summary
