@@ -34,9 +34,16 @@ impl Feed {
         }
     }
 
-    /// First tag = category; `None` = uncategorized.
+    /// First tag = category (may be a slash path `cat/sub`); `None` = uncategorized.
     pub fn category(&self) -> Option<&str> {
         self.tags.first().map(String::as_str)
+    }
+
+    /// Category path segments (`cat/sub` → `["cat", "sub"]`); empty = uncategorized.
+    pub fn category_segments(&self) -> Vec<&str> {
+        self.category()
+            .map(|c| c.split('/').filter(|s| !s.is_empty()).collect())
+            .unwrap_or_default()
     }
 
     /// Serialize back to urls-file line form.
@@ -125,6 +132,70 @@ impl File {
             .iter()
             .filter(|f| f.category() == Some(cat))
             .collect()
+    }
+
+    /// All category tree nodes as paths — every distinct prefix of every
+    /// feed's category path, in first-seen order (parents before children).
+    pub fn categories_tree(&self) -> Vec<Vec<String>> {
+        let mut out: Vec<Vec<String>> = Vec::new();
+        for f in &self.feeds {
+            let segs: Vec<String> =
+                f.category_segments().iter().map(|s| s.to_string()).collect();
+            if segs.is_empty() {
+                continue;
+            }
+            for i in 1..=segs.len() {
+                if !out.contains(&segs[..i].to_vec()) {
+                    out.push(segs[..i].to_vec());
+                }
+            }
+        }
+        out
+    }
+
+    /// Direct child category names of `path` (next segment only, deduped).
+    pub fn child_categories(&self, path: &[String]) -> Vec<String> {
+        let prefix = if path.is_empty() {
+            String::new()
+        } else {
+            format!("{}/", path.join("/"))
+        };
+        let mut out: Vec<String> = Vec::new();
+        for f in &self.feeds {
+            if let Some(c) = f.category() {
+                if let Some(rest) = c.strip_prefix(&prefix) {
+                    if let Some(next) = rest.split('/').next() {
+                        if !out.iter().any(|x| x == next) {
+                            out.push(next.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Feeds whose category is exactly `path` (joined) — direct children only.
+    pub fn by_category_path(&self, path: &[String]) -> Vec<&Feed> {
+        let joined = path.join("/");
+        self.feeds
+            .iter()
+            .filter(|f| f.category() == Some(joined.as_str()))
+            .collect()
+    }
+
+    /// Rename a category path `old` → `new`; renames the whole subtree
+    /// (feeds under `old/sub` become `new/sub`).
+    pub fn rename_category(&mut self, old: &str, new: &str) {
+        for f in self.feeds.iter_mut() {
+            if let Some(c) = f.category() {
+                if c == old {
+                    f.tags[0] = new.to_string();
+                } else if let Some(rest) = c.strip_prefix(&format!("{old}/")) {
+                    f.tags[0] = format!("{new}/{rest}");
+                }
+            }
+        }
     }
 
     pub fn uncategorized(&self) -> Vec<&Feed> {
@@ -289,5 +360,59 @@ mod tests {
         assert_eq!(file.categories(), vec!["tech", "blog"]);
         assert_eq!(file.by_category("tech").len(), 2);
         assert_eq!(file.uncategorized().len(), 1);
+    }
+
+    #[test]
+    fn nested_categories_tree() {
+        let mut file = File::default();
+        file.upsert(parse_line(r#"https://a.com/f "A" tech/rust/lang"#).unwrap());
+        file.upsert(parse_line(r#"https://b.com/f "B" tech/rust"#).unwrap());
+        file.upsert(parse_line(r#"https://c.com/f "C" tech/go"#).unwrap());
+        file.upsert(parse_line(r#"https://d.com/f "D" blog"#).unwrap());
+        file.upsert(parse_line(r#"https://e.com/f"#).unwrap());
+        // tree: parents before children, deduped
+        assert_eq!(
+            file.categories_tree(),
+            vec![
+                vec!["tech".to_string()],
+                vec!["tech".to_string(), "rust".to_string()],
+                vec!["tech".to_string(), "rust".to_string(), "lang".to_string()],
+                vec!["tech".to_string(), "go".to_string()],
+                vec!["blog".to_string()],
+            ]
+        );
+        // child categories of "tech"
+        assert_eq!(
+            file.child_categories(&["tech".to_string()]),
+            vec!["rust".to_string(), "go".to_string()]
+        );
+        // exact (direct) feeds only
+        assert_eq!(file.by_category_path(&["tech".to_string()]).len(), 0);
+        assert_eq!(file.by_category_path(&["tech".to_string(), "rust".to_string()]).len(), 1);
+        assert_eq!(file.by_category("tech/rust").len(), 1);
+    }
+
+    #[test]
+    fn rename_category_renames_subtree() {
+        let mut file = File::default();
+        file.upsert(parse_line(r#"https://a.com/f "A" tech/rust"#).unwrap());
+        file.upsert(parse_line(r#"https://b.com/f "B" tech/rust/lang"#).unwrap());
+        file.upsert(parse_line(r#"https://c.com/f "C" tech/go"#).unwrap());
+        file.upsert(parse_line(r#"https://d.com/f "D" blog"#).unwrap());
+        file.rename_category("tech", "dev");
+        assert_eq!(file.by_category("dev/rust").len(), 1);
+        assert_eq!(file.by_category("dev/rust/lang").len(), 1);
+        assert_eq!(file.by_category("dev/go").len(), 1);
+        assert_eq!(file.by_category("tech").len(), 0);
+        assert_eq!(file.by_category("blog").len(), 1);
+        // rename a mid-level node only moves its subtree
+        file.rename_category("dev/rust", "systems");
+        assert_eq!(file.by_category("systems").len(), 1);
+        assert_eq!(file.by_category("systems/lang").len(), 1);
+        assert_eq!(file.by_category("dev/go").len(), 1);
+        assert_eq!(
+            file.categories(),
+            vec!["systems", "systems/lang", "dev/go", "blog"]
+        );
     }
 }
