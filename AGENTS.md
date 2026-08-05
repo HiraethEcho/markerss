@@ -9,7 +9,7 @@ This repository's `main` branch is DESIGN-ONLY: markdown recording intent, roadm
   - `## Config` — app settings (cache TTL, export dir, refresh)
   - `## Tags & Favorites` — tags strip in lower nav + favorites as special category
   - `## Article Polish` — comfortable long-form article rendering
-  - `## Advanced` — advanced functions, more keys (details TBD by user)
+  - `## Advanced` — nav pane layouts, kitty images, link jump
 - Implementation in parallel sibling worktrees, one branch each (full sdd, own AGENTS.md + lightspec/):
   - `rust` → `../markerss-rust` (Rust + ratatui + feed-rs)
   - `go` → `../markerss-go` (Go + bubbletea + gofeed)

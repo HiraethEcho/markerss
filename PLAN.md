@@ -7,7 +7,7 @@ Progress per branch (rust / go / cpp). `##` = spec, `###` = branch. Each branch 
 ### rust
 
 - [x] Phase 1: Scaffold — cargo project, ratatui three-pane layout (nav/list/article), XDG dirs
-- [x] Phase 2: Feed source — newsboat `urls` parser, categories from tags, `~` custom display name
+- [x] Phase 2: Feed source — newsboat `urls` parser, categories from tags, quoted title = display name
 - [x] Phase 3: State — read status persistence, All Unread aggregation
 - [x] Phase 4: Nav tree — categories → feeds, h/l collapse, feed/category CRUD (rewrites urls file)
 - [x] Phase 5: Reading flow — summary in header, enter = read + full content, fetch on demand, n/p/j/k/ctrl+u/ctrl+d keys
@@ -22,7 +22,7 @@ MVP complete — pending user review + archive.
 ### go
 
 - [x] Phase 1: Scaffold — go module, bubbletea skeleton, three-pane layout (nav/list/article), XDG dirs
-- [x] Phase 2: Feed source — newsboat `urls` parser (category + `#tags`) + OPML file, `~` display name
+- [x] Phase 2: Feed source — newsboat `urls` parser (category + `#tags`) + OPML file, quoted title = display name
 - [x] Phase 3: State — read status persistence, All Unread aggregation
 - [x] Phase 4: Nav pane — virtual nodes (Unread/Read Later/Favourite/Saved) + Categories tree + Tags list, h/l collapse, category CRUD (rewrites urls file)
 - [x] Phase 5: Reading flow — left/right nav (h/l/q/enter/esc/←/→): expand→list→article+read→fetch full; n/p/j/k keys
@@ -35,7 +35,7 @@ MVP complete — pending user review + archive.
 ### cpp
 
 - [ ] Phase 1: Scaffold — build system, FTXUI skeleton, three-pane layout (nav/list/article), XDG dirs
-- [ ] Phase 2: Feed source — newsboat `urls` parser (category + `#tags`) + OPML file, `~` display name
+- [ ] Phase 2: Feed source — newsboat `urls` parser (category + `#tags`) + OPML file, quoted title = display name
 - [ ] Phase 3: State — read status persistence, All Unread aggregation
 - [ ] Phase 4: Nav pane — virtual nodes (Unread/Read Later/Favourite/Saved) + Categories tree + Tags list, h/l collapse, category CRUD (rewrites urls file)
 - [ ] Phase 5: Reading flow — left/right nav (h/l/q/enter/esc/←/→): expand→list→article+read→fetch full; n/p/j/k keys
@@ -49,21 +49,24 @@ MVP complete — pending user review + archive.
 
 ### rust
 
-- [ ] Phase 1: Config file parse — JSON / JSONC / TOML / YAML by extension; keys `cache_ttl_days` / `export_dir` / `pane_ratio` / `theme` / `browser` / `refresh`
+- [ ] Phase 1: Config file parse — JSON / JSONC / TOML / YAML by extension; keys `cache_ttl_days` / `export_dir` / `pane_ratio` / `theme` / `browser` / `refresh` / `nav_pane` / `images`
 - [ ] Phase 2: Wire config — cache TTL purge, export path, pane widths, browser, refresh behavior
 - [ ] Phase 3: Theme file load + defaults + XDG fallbacks when keys absent
+- [ ] Phase 4: Nav pane layouts — full + simple, `t` toggle, `nav_pane` override
 
 ### go
 
-- [ ] Phase 1: Config file parse — JSON / JSONC / TOML / YAML by extension; keys `cache_ttl_days` / `export_dir` / `pane_ratio` / `theme` / `browser` / `refresh`
+- [ ] Phase 1: Config file parse — JSON / JSONC / TOML / YAML by extension; keys `cache_ttl_days` / `export_dir` / `pane_ratio` / `theme` / `browser` / `refresh` / `nav_pane` / `images`
 - [ ] Phase 2: Wire config — cache TTL purge, export path, pane widths, browser, refresh behavior
 - [ ] Phase 3: Theme file load + defaults + XDG fallbacks when keys absent
+- [ ] Phase 4: Nav pane layouts — full + simple, `t` toggle, `nav_pane` override
 
 ### cpp
 
-- [ ] Phase 1: Config file parse — JSON / JSONC / TOML / YAML by extension; keys `cache_ttl_days` / `export_dir` / `pane_ratio` / `theme` / `browser` / `refresh`
+- [ ] Phase 1: Config file parse — JSON / JSONC / TOML / YAML by extension; keys `cache_ttl_days` / `export_dir` / `pane_ratio` / `theme` / `browser` / `refresh` / `nav_pane` / `images`
 - [ ] Phase 2: Wire config — cache TTL purge, export path, pane widths, browser, refresh behavior
 - [ ] Phase 3: Theme file load + defaults + XDG fallbacks when keys absent
+- [ ] Phase 4: Nav pane layouts — full + simple, `t` toggle, `nav_pane` override
 
 ## tags-favorites
 
@@ -93,32 +96,32 @@ MVP complete — pending user review + archive.
 - [ ] Phase 1: Reading width ~80 cols, paragraph spacing, heading hierarchy
 - [ ] Phase 2: Element styling — lists, code blocks, inline code, blockquotes, tables, hr, links, images
 - [ ] Phase 3: Scroll (j/k, ctrl-u/d, n/p) + scrollbar + viewport culling + theme colors
+- [ ] Phase 4: Enhancement — images via kitty protocol, `g` toggle + `images` config, `[img]` fallback
+- [ ] Phase 5: Enhancement — link jump `f` + hints (1-9/letters) + open in browser
 
 ### go
 
 - [ ] Phase 1: Reading width ~80 cols, paragraph spacing, heading hierarchy
 - [ ] Phase 2: Element styling — lists, code blocks, inline code, blockquotes, tables, hr, links, images
 - [ ] Phase 3: Scroll (j/k, ctrl-u/d, n/p) + scrollbar + viewport culling + theme colors
+- [ ] Phase 4: Enhancement — images via kitty protocol, `g` toggle + `images` config, `[img]` fallback
+- [ ] Phase 5: Enhancement — link jump `f` + hints (1-9/letters) + open in browser
 
 ### cpp
 
 - [ ] Phase 1: Reading width ~80 cols, paragraph spacing, heading hierarchy
 - [ ] Phase 2: Element styling — lists, code blocks, inline code, blockquotes, tables, hr, links, images
 - [ ] Phase 3: Scroll (j/k, ctrl-u/d, n/p) + scrollbar + viewport culling + theme colors
+- [ ] Phase 4: Enhancement — images via kitty protocol, `g` toggle + `images` config, `[img]` fallback
+- [ ] Phase 5: Enhancement — link jump `f` + hints (1-9/letters) + open in browser
 
 ## advanced
 
 ### rust
-
 - [ ] TBD — details to be written by user
 
 ### go
-
 - [ ] TBD — details to be written by user
 
 ### cpp
-
-- [ ] # TBD — details to be written by user
-- [ ] Phase 1: Lower nav strip — tags list below category tree
-- [ ] Phase 2: Tag assignment from article view + filter list by tag
-- [ ] Phase 3: Favorites special category (virtual node like All Unread) + toggle from article view
+- [ ] TBD — details to be written by user

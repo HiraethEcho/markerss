@@ -39,12 +39,12 @@ Feed list from two sources, both read live:
 - newsboat `urls` format (primary, single source of truth):
 
   ```
-  https://example.com/feed.xml "Display Name" category #tag1 #tag2
+  https://example.com "custom title" category #tag1 #tag2 #tag3
   ```
 
   - First non-`#` token = **category** (single — tree placement).
   - `#tag` tokens = **tags** (multi, optional) — shown in tags strip.
-  - `~` prefix on title = custom display name (overrides feed-provided title). NOT hidden.
+  - Quoted string = **custom display name** (overrides feed-provided title). NOT hidden.
 - OPML file — accepted as a feed list source, plus import/export for interop.
 
 - TUI category/feed CRUD rewrites the urls file.
@@ -139,6 +139,9 @@ Left/right movement via `h`/`l`, `q`/`enter`/`esc`, and arrow keys (`←`/`→`)
 | Tab / Shift+Tab | global | focus next / prev pane |
 | r | global | refresh |
 | ? | global | help (floating scrollable window) |
+| f | article | link jump — highlight links, 1-9/letter hints, press key to open in browser |
+| g | article | toggle kitty image render |
+| t | nav | toggle nav pane layout (Full ↔ Simple; disabled when `nav_pane` set) |
 
 ### Decisions
 
@@ -169,7 +172,17 @@ Left/right movement via `h`/`l`, `q`/`enter`/`esc`, and arrow keys (`←`/`→`)
   - `theme` — standalone theme file (colors), separate from config.
   - `browser` — which browser to open (default: `xdg-open`).
   - `refresh` — auto-on-startup on/off, interval.
+  - `nav_pane` — nav pane items + order, e.g. `["Unread", "Later", "Feeds"]`; overrides both default layouts.
+  - `images` — kitty image render on/off.
 - Read at startup; defaults + XDG fallbacks when keys absent. No hot-reload in MVP.
+
+### Nav Pane Layout
+
+- Two default layouts, toggle key `t`:
+  - **Full**: Unread, Read Later, Favourite, Categories/{cat/{feeds}}, Tags/{tags}, Saved
+  - **Simple**: Unread, Feeds/{feed1, feed2}
+- `nav_pane` set → replaces both defaults; unset → `t` toggles Full ↔ Simple.
+- Valid `nav_pane` items: `Unread`, `Read Later`, `Favourite`, `Saved`, `Categories`, `Tags`, `Feeds`.
 
 ### Suggested additional keys (optional)
 
@@ -188,6 +201,7 @@ Left/right movement via `h`/`l`, `q`/`enter`/`esc`, and arrow keys (`←`/`→`)
 | Theme | standalone file, referenced by `theme` key | colors ≠ app settings; swappable | 2026-08 |
 | Pane ratio | `pane_ratio` key, default 0.15/0.15/0.7 | user-adjustable layout | 2026-08 |
 | Browser | `browser` key, default xdg-open | user choice | 2026-08 |
+| Nav layout | `nav_pane` config + 2 defaults + `t` toggle | user control | 2026-08 |
 | Reload | startup only | MVP simplicity | 2026-08 |
 
 ## Tags & Favorites
@@ -244,6 +258,21 @@ Left/right movement via `h`/`l`, `q`/`enter`/`esc`, and arrow keys (`←`/`→`)
 - Render only visible lines (viewport culling); cap content size; no full-pane redraw on scroll.
 - Colors follow Config `theme` file (fallback default palette).
 
+### Article Enhancement
+
+#### Images
+
+- Render article `<img>` via kitty graphics protocol.
+- Detect terminal support; unsupported → `[img]` placeholder.
+- Toggle: key `g` in article + config `images` (bool).
+- Width constrained to article pane.
+
+#### Link Jump
+
+- `f` in article pane: highlight links, assign key hint per link — `1-9` then letters.
+- Press hint key → open link in `browser` (Config key).
+- Links stay underlined alt text; hints shown inline while in jump mode.
+
 ### Decisions
 
 | Decision | Choice | Rationale | Date |
@@ -252,6 +281,8 @@ Left/right movement via `h`/`l`, `q`/`enter`/`esc`, and arrow keys (`←`/`→`)
 | Alignment | left, no justification | terminal readability | 2026-08 |
 | Performance | viewport culling | long articles stay smooth | 2026-08 |
 | Theme | follows Config `theme` | consistent look | 2026-08 |
+| Images | kitty protocol; `g` toggle + `images` config | terminal graphics | 2026-08 |
+| Link jump | `f` → hints → browser | fast link open | 2026-08 |
 
 ## Advanced
 

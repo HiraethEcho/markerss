@@ -4,7 +4,7 @@ TUI RSS reader — browse feeds in the terminal, store blog posts as markdown on
 
 ## Repo Layout
 
-`main` is design-only (sdd-lite): [SPEC.md](SPEC.md) (intent), [PLAN.md](PLAN.md) (roadmap), [DESIGN.md](DESIGN.md) (TUI design). Five parallel specs — **MVP**, **Config**, **Tags & Favorites**, **Article Polish**, **Advanced** — each a `##` section in all three docs.
+`main` is design-only (sdd-lite): [SPEC.md](SPEC.md) (intent), [PLAN.md](PLAN.md) (roadmap), [DESIGN.md](DESIGN.md) (TUI design). Five parallel specs — **MVP**, **Config**, **Tags & Favorites**, **Article Polish & Enhancement**, **Advanced** — each a `##` section in all three docs.
 
 Implementation lives in parallel worktrees, one per language (full sdd):
 - `rust` → `../markerss-rust` (Rust + ratatui + feed-rs)
@@ -16,7 +16,7 @@ Each branch rebases on main and implements all five specs, in order MVP → Conf
 ## Usage
 
 ### Subscriptions
-`$XDG_CONFIG_HOME/markerss/urls` — newsboat format: `URL "Title" tag1 tag2`; `~` title prefix = custom display name.
+`$XDG_CONFIG_HOME/markerss/urls` — newsboat format: `URL "custom title" category #tag1 #tag2`; quoted title = display name.
 
 ### Config
 `$XDG_CONFIG_HOME/markerss/config` — JSON / JSONC / TOML / YAML (by extension); keys `cache_ttl_days`, `export_dir`, refresh behavior.
@@ -26,7 +26,7 @@ Each branch rebases on main and implements all five specs, in order MVP → Conf
 - Export: `$XDG_DATA_HOME/markerss/<category>/<slug>.md` (uncategorized → root)
 
 ### Keys
-`?` in-app help. Core: nav `j/k h/l enter`, article `n/p j/k ctrl+u ctrl+d enter`, `o` browser, `e` export, `u` read toggle, `A` mark-all-read, `r` refresh, `a/d/R` feed/category CRUD, `i/x` OPML.
+`?` in-app help. Core: nav `j/k h/l enter`, article `n/p j/k ctrl+u ctrl+d enter`, `o` browser, `e` export, `u` read toggle, `A` mark-all-read, `r` refresh, `a/d/R` feed/category CRUD, `i/x` OPML, `f` link jump, `g` image toggle, `t` nav layout toggle.
 
 ## Build & Run (per branch)
 

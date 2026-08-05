@@ -10,7 +10,7 @@ Three-pane TUI RSS reader: browse feeds, store posts as markdown on command.
 ### What We're Building
 - Three-pane TUI: nav pane / list pane (item list) / article pane
 - Nav pane: All Unread / Read Later / Favourite / Saved virtual nodes + Categories tree (uncategorized feeds at root) + Tags list
-- Feed sources: newsboat `urls` format primary (`url "title" category #tag1 #tag2`) + OPML file; `~` prefix = custom display name; OPML import/export
+- Feed sources: newsboat `urls` format primary (`url "custom title" category #tag1 #tag2`) + OPML file; quoted title = custom display name; OPML import/export
 - Category vs tags: each feed has exactly one category (tree placement) + 0..n `#tags` (optional)
 - Navigation: `h/l`, `q/enter/esc`, `←/→` for left/right — right: folded category→expand, expanded category/feed→list, item→article+read, article→fetch full; left: go back one level
 - Reading flow: refresh stores summary only; list nav → article header shows summary; `<enter>` list → open + mark read; `<enter>` article pane → fetch full article (never auto-fetch)
@@ -48,8 +48,9 @@ User-configurable app settings via a config file.
 ### What We're Building
 - Config file at `$XDG_CONFIG_HOME/markerss/config`, separate from `urls` subscriptions file
 - Format: JSON, JSONC, TOML, or YAML — detected by extension (`.json`/`.jsonc`/`.toml`/`.yaml`/`.yml`); plain `config` defaults to one (TOML)
-- Keys: `cache_ttl_days` (startup purge), `export_dir` (export location), `pane_ratio` (three-pane widths, e.g. 0.15/0.15/0.7), `theme` (standalone color file), `browser` (which browser to open), `refresh` (auto-on-startup on/off, interval)
+- Keys: `cache_ttl_days` (startup purge), `export_dir` (export location), `pane_ratio` (three-pane widths, e.g. 0.15/0.15/0.7), `theme` (standalone color file), `browser` (which browser to open), `refresh` (auto-on-startup on/off, interval), `nav_pane` (nav items array, e.g. `["Unread", "Later", "Feeds"]`), `images` (kitty image render on/off)
 - Optional: `fetch_timeout`, `max_items_per_feed`, `proxy`, `keybindings`, `default_view`
+- Nav pane layout: two defaults — full (Unread/Read Later/Favourite/Categories/Tags/Saved) and simple (Unread/Feeds); `t` toggles; `nav_pane` array overrides both
 - Defaults when keys absent; XDG fallbacks per spec
 - Read at startup; changes require restart (no hot-reload in MVP)
 
@@ -61,6 +62,7 @@ User-configurable app settings via a config file.
 | Theme | standalone file, referenced by `theme` key | colors ≠ app settings; swappable | 2026-08 |
 | Pane ratio | `pane_ratio` key, default 0.15/0.15/0.7 | user-adjustable layout | 2026-08 |
 | Browser | `browser` key, default xdg-open | user choice | 2026-08 |
+| Nav layout | `nav_pane` config + 2 defaults + `t` toggle | user control | 2026-08 |
 | Reload | startup only | MVP simplicity | 2026-08 |
 
 ## Tags & Favorites
@@ -97,6 +99,10 @@ Comfortable long-form reading in the article pane — typography, spacing, eleme
 - Performance: render only visible lines (viewport culling), cap content size, no full-pane redraw on scroll
 - Theme-aware colors (respects Config `theme` file)
 
+### Article Enhancement
+- Images: render article `<img>` via kitty protocol; terminal-detect → `[img]` fallback; toggle `g` + config `images`; width = article pane
+- Link jump: `f` highlights links, 1-9 then letter hints; press key → open in `browser`
+
 ### Decisions
 | Decision | Choice | Rationale | Date |
 |---|---|---|---|
@@ -104,6 +110,8 @@ Comfortable long-form reading in the article pane — typography, spacing, eleme
 | Alignment | left, no justification | terminal readability | 2026-08 |
 | Performance | viewport culling | long articles stay smooth | 2026-08 |
 | Theme | follows Config `theme` | consistent look | 2026-08 |
+| Images | kitty protocol; `g` toggle + `images` config | terminal graphics | 2026-08 |
+| Link jump | `f` → hints → browser | fast link open | 2026-08 |
 
 ## Advanced
 
