@@ -107,6 +107,7 @@ struct App {
 
 #[derive(Debug, Clone)]
 enum TreeRow {
+    Section(String),
     AllUnread,
     ReadLater,
     Saved,
@@ -188,6 +189,7 @@ impl App {
             });
         let mut rows: Vec<TreeRow> = Vec::new();
         for section in preset {
+            rows.push(TreeRow::Section(section.clone()));
             match section.as_str() {
                 "Unread" => rows.push(TreeRow::AllUnread),
                 "Read Later" => rows.push(TreeRow::ReadLater),
@@ -243,7 +245,11 @@ impl App {
     }
 
     fn select_scope(&mut self, row: &TreeRow) {
+        if matches!(row, TreeRow::Section(_)) {
+            return;
+        }
         self.scope = match row {
+            TreeRow::Section(_) => return,
             TreeRow::AllUnread => Scope::AllUnread,
             TreeRow::ReadLater => Scope::ReadLater,
             TreeRow::Saved => Scope::Saved,
@@ -261,7 +267,11 @@ impl App {
     /// Follow nav selection into the list pane (preview) without moving focus.
     fn preview_scope(&mut self) {
         if let Some(row) = self.tree_rows.get(self.tree_sel).cloned() {
+            if matches!(row, TreeRow::Section(_)) {
+                return;
+            }
             self.scope = match row {
+                TreeRow::Section(_) => return,
                 TreeRow::AllUnread => Scope::AllUnread,
                 TreeRow::ReadLater => Scope::ReadLater,
                 TreeRow::Saved => Scope::Saved,
@@ -945,6 +955,7 @@ impl App {
     /// Nav right: collapsed category/favourite → expand; else descend into scope.
     fn nav_right(&mut self) {
         match self.tree_rows.get(self.tree_sel).cloned() {
+            Some(TreeRow::Section(_)) => {}
             Some(TreeRow::Category(cat)) if self.collapsed.contains(&cat) => {
                 self.collapsed.remove(&cat);
                 self.rebuild_tree();
@@ -1083,6 +1094,12 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
     let mut items: Vec<ListItem> = Vec::new();
     for (i, row) in app.tree_rows.iter().enumerate() {
         let (text, style) = match row {
+            TreeRow::Section(name) => (
+                name.clone(),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
             TreeRow::AllUnread => {
                 let n = app.db.total_unread().unwrap_or(0);
                 (format!("Unread ({n})"), Style::default().add_modifier(Modifier::BOLD))
