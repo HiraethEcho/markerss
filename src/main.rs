@@ -829,6 +829,8 @@ impl App {
                     }),
                 };
                 self.db.update_item_content(&feed_url, &guid, &html).ok();
+                // content changed — invalidate the rendered-body cache
+                self.article_render = None;
                 self.status = format!("fetched {} ({} chars)", url, html.len());
             }
             Err(e) => {
