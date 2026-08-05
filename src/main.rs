@@ -189,7 +189,10 @@ impl App {
             });
         let mut rows: Vec<TreeRow> = Vec::new();
         for section in preset {
-            rows.push(TreeRow::Section(section.clone()));
+            // Favourite renders as its own node + children (no separate header)
+            if section != "Favourite" {
+                rows.push(TreeRow::Section(section.clone()));
+            }
             match section.as_str() {
                 "Unread" => rows.push(TreeRow::AllUnread),
                 "Read Later" => rows.push(TreeRow::ReadLater),
@@ -818,9 +821,9 @@ impl App {
             KeyCode::Char('t') if self.focus == 0 => self.cycle_preset(),
             // f: favourite the selected feed (nav)
             KeyCode::Char('f') if self.focus == 0 => self.toggle_favourite_feed(),
-            // L / S: item flags from the article view
-            KeyCode::Char('L') if self.focus == 2 => self.toggle_item_flag("read_later"),
-            KeyCode::Char('S') if self.focus == 2 => self.toggle_item_flag("saved"),
+            // L / S: item flags from list or article pane (toggle; again to cancel)
+            KeyCode::Char('L') if self.focus >= 1 => self.toggle_item_flag("read_later"),
+            KeyCode::Char('S') if self.focus >= 1 => self.toggle_item_flag("saved"),
             KeyCode::Tab => self.focus = (self.focus + 1) % 3,
             KeyCode::BackTab => self.focus = (self.focus + 2) % 3,
             KeyCode::Char('a') if self.focus == 0 => self.start_input(InputMode::AddUrl),
