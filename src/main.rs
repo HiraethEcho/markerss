@@ -922,7 +922,11 @@ impl App {
             }
             KeyCode::Char('f') if self.focus == 0 => self.toggle_favourite_feed(),
             KeyCode::Char('?') => self.show_help = true,
-            KeyCode::Char('r') => self.refresh_all(true),
+            // r: partial refresh (fetch new unread, append); R: refresh all (rebuild)
+            KeyCode::Char('r') => self.refresh_all(false),
+            KeyCode::Char('R') => self.refresh_all(true),
+            // a: toggle read of the current item; A: mark all in view read
+            KeyCode::Char('a') => self.toggle_read(),
             KeyCode::Char('A') => self.mark_all_read(),
             KeyCode::Char('e') => {
                 if let Err(e) = self.export_markdown() {
@@ -930,14 +934,13 @@ impl App {
                 }
             }
             KeyCode::Char('o') => self.open_browser(),
-            KeyCode::Char('u') => self.toggle_read(),
             KeyCode::Char('t') if self.focus == 0 => self.cycle_preset(),
             // L / S: item flags from list or article pane (toggle; again to cancel)
             KeyCode::Char('L') if self.focus >= 1 => self.toggle_item_flag("read_later"),
             KeyCode::Char('S') if self.focus >= 1 => self.toggle_item_flag("saved"),
             KeyCode::Tab => self.focus = (self.focus + 1) % 3,
             KeyCode::BackTab => self.focus = (self.focus + 2) % 3,
-            KeyCode::Char('a') if self.focus == 0 => self.start_input(InputMode::AddUrl),
+            KeyCode::Char('N') if self.focus == 0 => self.start_input(InputMode::AddUrl),
             KeyCode::Char('d') if self.focus == 0 => {
                 if self.delete_armed {
                     self.delete_armed = false;
@@ -955,7 +958,7 @@ impl App {
                     self.status = format!("press d again to delete {name}");
                 }
             }
-            KeyCode::Char('R') if self.focus == 0 => self.start_input(InputMode::RenameCategory),
+            KeyCode::Char('M') if self.focus == 0 => self.start_input(InputMode::RenameCategory),
             // T: edit tags of the selected feed (nav)
             KeyCode::Char('T') if self.focus == 0 => {
                 if let Some(TreeRow::Feed(url, _, _)) = self.tree_rows.get(self.tree_sel).cloned() {
@@ -1592,13 +1595,13 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
     let text = Text::from(
         "Keys\n\
          ─────\n\
-         nav:   j/k move · h/l expand/collapse+descend · a add feed · d delete · R rename category\n\
+         nav:   j/k move · h/l expand/collapse+descend · N add feed · d delete · M rename category · F favourite\n\
          list:  j/k move · l/enter open (mark read)\n\
          article: j/k scroll · n/p item · ctrl+u/ctrl+d half page · l/enter fetch full\n\
          left:  h/q/esc — article→list→nav→parent\n\
          right: l/enter — expand→list→article→fetch\n\
-         global: o browser · e export · u toggle read · A mark all read\n\
-         r refresh · i import OPML · x export OPML · tab focus · F fullscreen · Q quit · ? help\n\n\
+         global: o browser · e export · a toggle read · A mark all read\n\
+         r partial refresh · R refresh all · i import OPML · x export OPML · tab focus · Q quit · ? help\n\n\
          export → $XDG_DATA_HOME/markerss/<category>/<slug>.md",
     );
     // floating opaque window, default colors, scrollable with j/k
