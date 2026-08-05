@@ -353,12 +353,9 @@ impl App {
                 }
             }
         }
-        // unread first, then date desc
-        items.sort_by(|a, b| {
-            let ar = self.db.is_read(&a.0, &a.1.guid).unwrap_or(false);
-            let br = self.db.is_read(&b.0, &b.1.guid).unwrap_or(false);
-            ar.cmp(&br).then_with(|| b.1.date.cmp(&a.1.date))
-        });
+        // stable order (date desc, as inserted by refresh) — never re-sort
+        // on read toggles so the selection stays on the same item
+        items.sort_by(|a, b| b.1.date.cmp(&a.1.date));
         self.scoped_items = items;
         if self.list_sel >= self.scoped_items.len() {
             self.list_sel = self.scoped_items.len().saturating_sub(1);
@@ -1183,7 +1180,16 @@ fn render(frame: &mut Frame, app: &mut App) {
 
 fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
     let mut items: Vec<ListItem> = Vec::new();
-    for (i, row) in app.tree_rows.iter().enumerate() {
+    let visible = (area.height as usize).saturating_sub(2).max(1);
+    let offset = app.tree_sel.saturating_sub(visible.saturating_sub(1));
+    let window: Vec<(usize, &TreeRow)> = app
+        .tree_rows
+        .iter()
+        .enumerate()
+        .skip(offset)
+        .take(visible)
+        .collect();
+    for (i, row) in window {
         let (text, style) = match row {
             TreeRow::Section(name) => {
                 let prefix = if app.collapsed.contains(name) { "▸" } else { "▾" };
@@ -1275,7 +1281,17 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &App) {
     if app.scoped_items.is_empty() {
         items.push(ListItem::new("no items — r to refresh"));
     }
-    for (i, (url, item)) in app.scoped_items.iter().enumerate() {
+    // window around the selection so long lists scroll with the cursor
+    let visible = (area.height as usize).saturating_sub(2).max(1);
+    let offset = app.list_sel.saturating_sub(visible.saturating_sub(1));
+    let window: Vec<(usize, &(String, Item))> = app
+        .scoped_items
+        .iter()
+        .enumerate()
+        .skip(offset)
+        .take(visible)
+        .collect();
+    for (i, (url, item)) in window {
         let read = app.db.is_read(url, &item.guid).unwrap_or(false);
         let marker = if read { " " } else { "•" };
         let flags = if item.saved && item.read_later {
