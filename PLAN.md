@@ -5,18 +5,22 @@ Progress per branch (rust / go / cpp). `##` = spec, `###` = branch. Each branch 
 ## mvp
 
 ### rust
-- [ ] Phase 1: Scaffold — crate, ratatui skeleton, three-pane layout (nav/list/article), XDG dirs
-- [ ] Phase 2: Feed source — newsboat `urls` parser (category + `#tags`) + OPML file, `~` display name
-- [ ] Phase 3: State — read status persistence, All Unread aggregation
-- [ ] Phase 4: Nav pane — virtual nodes (Unread/Read Later/Favourite/Saved) + Categories tree + Tags list, h/l collapse, category CRUD (rewrites urls file)
-- [ ] Phase 5: Reading flow — left/right nav (h/l/q/enter/esc/←/→): expand→list→article+read→fetch full; n/p/j/k keys
-- [ ] Phase 6: Refresh — startup auto + `r` manual, feed-rs, error handling
-- [ ] Phase 7: Export — `e` → frontmatter + full content markdown, title-slug filename
-- [ ] Phase 8: Cache — gzipped HTML + metadata, TTL cleanup config
-- [ ] Phase 9: OPML — import + export + as feed list source
-- [ ] Phase 10: Polish — empty states, spinner, help bar, README usage
+
+- [x] Phase 1: Scaffold — cargo project, ratatui three-pane layout (nav/list/article), XDG dirs
+- [x] Phase 2: Feed source — newsboat `urls` parser, categories from tags, `~` custom display name
+- [x] Phase 3: State — read status persistence, All Unread aggregation
+- [x] Phase 4: Nav tree — categories → feeds, h/l collapse, feed/category CRUD (rewrites urls file)
+- [x] Phase 5: Reading flow — summary in header, enter = read + full content, fetch on demand, n/p/j/k/ctrl+u/ctrl+d keys
+- [x] Phase 6: Refresh — startup auto + `r` manual, feed-rs, threaded, error handling
+- [x] Phase 7: Export — `e` → frontmatter + full content markdown, `<category>/<slug>.md`
+- [x] Phase 8: Cache — gzipped HTML + TTL cleanup config
+- [x] Phase 9: OPML — import (`i`) + export (`x`)
+- [x] Phase 10: Polish — empty states, help bar (`?`), README usage
+
+MVP complete — pending user review + archive.
 
 ### go
+
 - [x] Phase 1: Scaffold — go module, bubbletea skeleton, three-pane layout (nav/list/article), XDG dirs
 - [x] Phase 2: Feed source — newsboat `urls` parser (category + `#tags`) + OPML file, `~` display name
 - [x] Phase 3: State — read status persistence, All Unread aggregation
@@ -29,6 +33,7 @@ Progress per branch (rust / go / cpp). `##` = spec, `###` = branch. Each branch 
 - [x] Phase 10: Polish — empty states, spinner, help bar, README usage
 
 ### cpp
+
 - [ ] Phase 1: Scaffold — build system, FTXUI skeleton, three-pane layout (nav/list/article), XDG dirs
 - [ ] Phase 2: Feed source — newsboat `urls` parser (category + `#tags`) + OPML file, `~` display name
 - [ ] Phase 3: State — read status persistence, All Unread aggregation
@@ -43,16 +48,19 @@ Progress per branch (rust / go / cpp). `##` = spec, `###` = branch. Each branch 
 ## config
 
 ### rust
+
 - [ ] Phase 1: Config file parse — JSON / JSONC / TOML / YAML by extension; keys `cache_ttl_days` / `export_dir` / `pane_ratio` / `theme` / `browser` / `refresh`
 - [ ] Phase 2: Wire config — cache TTL purge, export path, pane widths, browser, refresh behavior
 - [ ] Phase 3: Theme file load + defaults + XDG fallbacks when keys absent
 
 ### go
+
 - [ ] Phase 1: Config file parse — JSON / JSONC / TOML / YAML by extension; keys `cache_ttl_days` / `export_dir` / `pane_ratio` / `theme` / `browser` / `refresh`
 - [ ] Phase 2: Wire config — cache TTL purge, export path, pane widths, browser, refresh behavior
 - [ ] Phase 3: Theme file load + defaults + XDG fallbacks when keys absent
 
 ### cpp
+
 - [ ] Phase 1: Config file parse — JSON / JSONC / TOML / YAML by extension; keys `cache_ttl_days` / `export_dir` / `pane_ratio` / `theme` / `browser` / `refresh`
 - [ ] Phase 2: Wire config — cache TTL purge, export path, pane widths, browser, refresh behavior
 - [ ] Phase 3: Theme file load + defaults + XDG fallbacks when keys absent
@@ -60,16 +68,20 @@ Progress per branch (rust / go / cpp). `##` = spec, `###` = branch. Each branch 
 ## tags-favorites
 
 ### rust
+
 - [ ] Phase 1: Flags — per-item `read_later` / `favorite` / `saved` in DB, toggle from article view; virtual nodes Read Later / Favourite / Saved in nav
 - [ ] Phase 2: Tags list in nav pane (below Categories) — from feed `#tags`; select tag → filter list; assign tags to items from article view
 - [ ] Phase 3: Saved semantics — exempt from TTL cleanup, kept in DB without markdown
 
 ### go
+
 - [ ] Phase 1: Flags — per-item `read_later` / `favorite` / `saved` in DB, toggle from article view; virtual nodes Read Later / Favourite / Saved in nav
 - [ ] Phase 2: Tags list in nav pane (below Categories) — from feed `#tags`; select tag → filter list; assign tags to items from article view
 - [ ] Phase 3: Saved semantics — exempt from TTL cleanup, kept in DB without markdown
 
 ### cpp
+
+
 - [ ] Phase 1: Flags — per-item `read_later` / `favorite` / `saved` in DB, toggle from article view; virtual nodes Read Later / Favourite / Saved in nav
 - [ ] Phase 2: Tags list in nav pane (below Categories) — from feed `#tags`; select tag → filter list; assign tags to items from article view
 - [ ] Phase 3: Saved semantics — exempt from TTL cleanup, kept in DB without markdown
@@ -77,16 +89,19 @@ Progress per branch (rust / go / cpp). `##` = spec, `###` = branch. Each branch 
 ## article-polish
 
 ### rust
+
 - [ ] Phase 1: Reading width ~80 cols, paragraph spacing, heading hierarchy
 - [ ] Phase 2: Element styling — lists, code blocks, inline code, blockquotes, tables, hr, links, images
 - [ ] Phase 3: Scroll (j/k, ctrl-u/d, n/p) + scrollbar + viewport culling + theme colors
 
 ### go
+
 - [ ] Phase 1: Reading width ~80 cols, paragraph spacing, heading hierarchy
 - [ ] Phase 2: Element styling — lists, code blocks, inline code, blockquotes, tables, hr, links, images
 - [ ] Phase 3: Scroll (j/k, ctrl-u/d, n/p) + scrollbar + viewport culling + theme colors
 
 ### cpp
+
 - [ ] Phase 1: Reading width ~80 cols, paragraph spacing, heading hierarchy
 - [ ] Phase 2: Element styling — lists, code blocks, inline code, blockquotes, tables, hr, links, images
 - [ ] Phase 3: Scroll (j/k, ctrl-u/d, n/p) + scrollbar + viewport culling + theme colors
@@ -94,10 +109,16 @@ Progress per branch (rust / go / cpp). `##` = spec, `###` = branch. Each branch 
 ## advanced
 
 ### rust
+
 - [ ] TBD — details to be written by user
 
 ### go
+
 - [ ] TBD — details to be written by user
 
 ### cpp
-- [ ] TBD — details to be written by user
+
+- [ ] # TBD — details to be written by user
+- [ ] Phase 1: Lower nav strip — tags list below category tree
+- [ ] Phase 2: Tag assignment from article view + filter list by tag
+- [ ] Phase 3: Favorites special category (virtual node like All Unread) + toggle from article view

@@ -1,6 +1,5 @@
 # AGENTS
 
-<!-- LIGHTSPEC:START -->
 This repository's `main` branch is DESIGN-ONLY: markdown recording intent, roadmap, and design. No code, no lightspec/. Runs sdd-lite: SPEC/PLAN/DESIGN, no lightspec/.
 
 ## Repo Structure
@@ -18,15 +17,39 @@ This repository's `main` branch is DESIGN-ONLY: markdown recording intent, roadm
 
 ## Role of Files in main
 
-| File | Role |
-|---|---|
-| `SPEC.md` | Intent summary — 3 specs, each: goal + what + decisions |
-| `PLAN.md` | Roadmap + per-branch progress — `##` = spec, `###` = branch (rust/go/cpp), phases with checkboxes |
-| `DESIGN.md` | Design detail — 3 specs, each: behavior + decisions. Design authority; changes land here first |
-| `AGENTS.md` | This file — repo structure + workflow for agents |
-| `README.md` | Human-facing — repo layout, usage, build & run |
+| File        | Role                                                                                              |
+| ----------- | ------------------------------------------------------------------------------------------------- |
+| `SPEC.md`   | Intent summary — 3 specs, each: goal + what + decisions                                           |
+| `PLAN.md`   | Roadmap + per-branch progress — `##` = spec, `###` = branch (rust/go/cpp), phases with checkboxes |
+| `DESIGN.md` | Design detail — 3 specs, each: behavior + decisions. Design authority; changes land here first    |
+| `AGENTS.md` | This file — repo structure + workflow for agents                                                  |
+| `README.md` | Human-facing — repo layout, usage, build & run                                                    |
 
 ## Workflow
 
+### main
+
 Edit design docs on main → commit → each branch `git rebase main` → implement against DESIGN.md. Each branch implements ALL five specs, in order MVP → Config → Tags & Favorites → Article Polish → Advanced. Tick the branch's checkboxes in PLAN.md as phases complete.
-<!-- LIGHTSPEC:END -->
+
+### dev branches
+
+SDD Workflow (default tier)
+
+| Phase           | Command             |
+| --------------- | ------------------- |
+| Init (default)  | `/sdd-init`         |
+| Proposal        | `/spec`             |
+| Plan            | `/plan`             |
+| Apply           | `/build`            |
+| Test            | `/test`             |
+| Review          | `/review`           |
+| Ship            | `/ship`             |
+| Pause / handoff | `/rest`             |
+| Pickup          | `/pickup`           |
+| Archive         | `lightspec archive` |
+
+- New session / interrupted → `/pickup`
+- Vague request → discovery (`discovery` + `idea-refine`) before spec
+- Coding → `building` (thin slices, ponytail); testing → `test-driven-development`
+- Task self-review → `reviewing`; security-sensitive → `security-and-hardening`
+- Design updates land on `main` → `git rebase main` here before implementing
