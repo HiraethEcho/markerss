@@ -42,6 +42,8 @@ enum InputMode {
     AddUrl,
     AddTitle,
     AddCategory,
+    AddTags,
+    EditTags,
     RenameCategory,
     ImportOpml,
 }
@@ -97,6 +99,8 @@ struct App {
     input: Option<InputPrompt>,
     add_pending: Option<String>,
     add_pending_title: Option<String>,
+    add_pending_category: Option<Vec<String>>,
+    edit_tags_url: Option<String>,
     rx: Receiver<Msg>,
     tx: Sender<Msg>,
 }
@@ -144,6 +148,8 @@ impl App {
             input: None,
             add_pending: None,
             add_pending_title: None,
+            add_pending_category: None,
+            edit_tags_url: None,
             rx,
             tx,
         };
@@ -407,10 +413,27 @@ impl App {
             InputMode::AddUrl => "feed URL:".to_string(),
             InputMode::AddTitle => "display title (empty = none):".to_string(),
             InputMode::AddCategory => "category (space-separated, empty = none):".to_string(),
+            InputMode::AddTags | InputMode::EditTags => {
+                "tags (space-separated, empty = none):".to_string()
+            }
             InputMode::RenameCategory => "new category name:".to_string(),
             InputMode::ImportOpml => "OPML file path:".to_string(),
         };
-        self.input = Some(InputPrompt { mode, prompt, buf: String::new() });
+        let mut buf = String::new();
+        // prefill current tags when editing
+        if let InputMode::EditTags = &mode {
+            if let Some(url) = &self.edit_tags_url {
+                if let Some(f) = self.feeds.feeds.iter().find(|f| &f.url == url) {
+                    buf = f
+                        .feed_tags
+                        .iter()
+                        .map(|t| format!("#{t}"))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                }
+            }
+        }
+        self.input = Some(InputPrompt { mode, prompt, buf });
     }
 
     fn submit_input(&mut self) {
@@ -436,14 +459,26 @@ impl App {
             }
             InputMode::AddCategory => {
                 let url = self.add_pending.take().unwrap_or_default();
-                let title = self.add_pending_title.take();
                 let tags: Vec<String> = val.split_whitespace().map(str::to_string).collect();
+                self.add_pending = Some(url);
+                self.add_pending_category = Some(tags);
+                self.start_input(InputMode::AddTags);
+            }
+            InputMode::AddTags => {
+                let url = self.add_pending.take().unwrap_or_default();
+                let title = self.add_pending_title.take();
+                let tags = self.add_pending_category.take().unwrap_or_default();
+                let feed_tags: Vec<String> = val
+                    .split_whitespace()
+                    .map(|w| w.trim_start_matches('#').to_string())
+                    .filter(|t| !t.is_empty())
+                    .collect();
                 let feed = Feed {
                     url: url.clone(),
                     title,
                     custom_name: false,
                     tags,
-                    feed_tags: Vec::new(),
+                    feed_tags,
                     favourite: false,
                 };
                 self.feeds.upsert(feed);
@@ -451,6 +486,23 @@ impl App {
                 self.rebuild_tree();
                 self.status = format!("added {url}");
                 self.refresh_feed_thread(url);
+            }
+            InputMode::EditTags => {
+                let url = self.edit_tags_url.take().unwrap_or_default();
+                if url.is_empty() {
+                    return;
+                }
+                let feed_tags: Vec<String> = val
+                    .split_whitespace()
+                    .map(|w| w.trim_start_matches('#').to_string())
+                    .filter(|t| !t.is_empty())
+                    .collect();
+                if let Some(f) = self.feeds.feeds.iter_mut().find(|f| f.url == url) {
+                    f.feed_tags = feed_tags;
+                }
+                self.save_urls();
+                self.rebuild_tree();
+                self.status = format!("tags updated for {url}");
             }
             InputMode::RenameCategory => {
                 if val.is_empty() {
@@ -780,6 +832,13 @@ impl App {
                 }
             }
             KeyCode::Char('R') if self.focus == 0 => self.start_input(InputMode::RenameCategory),
+            // T: edit tags of the selected feed (nav)
+            KeyCode::Char('T') if self.focus == 0 => {
+                if let Some(TreeRow::Feed(url, _)) = self.tree_rows.get(self.tree_sel).cloned() {
+                    self.edit_tags_url = Some(url);
+                    self.start_input(InputMode::EditTags);
+                }
+            }
             KeyCode::Char('i') => self.start_input(InputMode::ImportOpml),
             KeyCode::Char('x') => self.export_opml(),
             _ => match self.focus {
