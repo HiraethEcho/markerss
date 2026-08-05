@@ -13,6 +13,10 @@ pub struct Item {
     pub content: String,
     /// ISO-8601 published date; empty if unknown.
     pub date: String,
+    /// Read-later flag (item-level).
+    pub read_later: bool,
+    /// Saved flag (item-level, exempt from TTL).
+    pub saved: bool,
 }
 
 impl Item {
