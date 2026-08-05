@@ -640,11 +640,40 @@ impl App {
         });
     }
 
+    /// Feed urls belonging to the current scope (for partial refresh).
+    fn scope_feeds(&self) -> Vec<String> {
+        match &self.scope {
+            Scope::AllUnread | Scope::ReadLater | Scope::Saved => {
+                self.feeds.feeds.iter().map(|f| f.url.clone()).collect()
+            }
+            Scope::Category(c) => self
+                .feeds
+                .by_category(c)
+                .iter()
+                .map(|f| f.url.clone())
+                .collect(),
+            Scope::Feed(u) => vec![u.clone()],
+            Scope::Tag(t) => self
+                .feeds
+                .feeds
+                .iter()
+                .filter(|f| f.has_tag(t))
+                .map(|f| f.url.clone())
+                .collect(),
+        }
+    }
+
     fn refresh_all(&mut self, full: bool) {
         if self.pending_refreshes > 0 {
             return;
         }
-        let urls: Vec<String> = self.feeds.feeds.iter().map(|f| f.url.clone()).collect();
+        // partial refresh targets only the feeds in the current list;
+        // full refresh targets every feed
+        let urls: Vec<String> = if full {
+            self.feeds.feeds.iter().map(|f| f.url.clone()).collect()
+        } else {
+            self.scope_feeds()
+        };
         if urls.is_empty() {
             self.status = "no feeds — add subscriptions to the urls file".into();
             return;
@@ -1140,26 +1169,38 @@ impl App {
             Some(TreeRow::Section(name)) if self.collapsed.contains(&name) => {
                 self.collapsed.remove(&name);
                 self.rebuild_tree();
+                self.step_into_expanded();
             }
             Some(TreeRow::Section(_)) => {}
             Some(TreeRow::Category(cat)) if self.collapsed.contains(&cat) => {
                 self.collapsed.remove(&cat);
                 self.rebuild_tree();
+                self.step_into_expanded();
             }
             Some(TreeRow::Favourite) if !self.fav_expanded => {
                 self.fav_expanded = true;
                 self.rebuild_tree();
+                self.step_into_expanded();
             }
             Some(TreeRow::Uncategorized) if !self.uncat_expanded => {
                 self.uncat_expanded = true;
                 self.rebuild_tree();
+                self.step_into_expanded();
             }
             Some(TreeRow::Tag(t)) if self.collapsed.contains(&format!("tag:{t}")) => {
                 self.collapsed.remove(&format!("tag:{t}"));
                 self.rebuild_tree();
+                self.step_into_expanded();
             }
             Some(row) => self.select_scope(&row),
             None => {}
+        }
+    }
+
+    /// After expanding a fold, move the cursor to its first child row.
+    fn step_into_expanded(&mut self) {
+        if self.tree_sel + 1 < self.tree_rows.len() {
+            self.tree_sel += 1;
         }
     }
 
