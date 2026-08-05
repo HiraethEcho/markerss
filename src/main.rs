@@ -86,6 +86,8 @@ struct App {
     // article
     article_scroll: u16,
     fetching: bool,
+    // rendered article body, keyed by item guid (avoid per-frame html2md)
+    article_render: Option<(String, ratatui::text::Text<'static>)>,
 
     focus: usize, // 0 nav, 1 list, 2 article
     fullscreen: bool,
@@ -114,7 +116,7 @@ enum TreeRow {
     Favourite,
     FavouriteFeed(String, String), // url, display name
     Category(String),
-    Feed(String, String), // url, display name
+    Feed(String, String, u8), // url, display name, indent
     Tag(String),
 }
 
@@ -137,6 +139,7 @@ impl App {
             scoped_items: Vec::new(),
             article_scroll: 0,
             fetching: false,
+            article_render: None,
             focus: 0,
             fullscreen: false,
             delete_armed: false,
@@ -189,9 +192,18 @@ impl App {
             });
         let mut rows: Vec<TreeRow> = Vec::new();
         for section in preset {
-            // Favourite renders as its own node + children (no separate header)
-            if section != "Favourite" {
+            // single-node sections (Unread / Read Later / Saved / Favourite)
+            // render as the node itself; list sections get a foldable header
+            let is_node_section = matches!(
+                section.as_str(),
+                "Unread" | "Read Later" | "Saved" | "Favourite"
+            );
+            if !is_node_section {
                 rows.push(TreeRow::Section(section.clone()));
+            }
+            let section_collapsed = self.collapsed.contains(&section);
+            if section_collapsed {
+                continue;
             }
             match section.as_str() {
                 "Unread" => rows.push(TreeRow::AllUnread),
@@ -216,6 +228,7 @@ impl App {
                                 rows.push(TreeRow::Feed(
                                     f.url.clone(),
                                     f.display_name().to_string(),
+                                    4,
                                 ));
                             }
                         }
@@ -223,12 +236,21 @@ impl App {
                 }
                 "Tags" => {
                     for t in self.feeds.all_feed_tags() {
-                        rows.push(TreeRow::Tag(t));
+                        rows.push(TreeRow::Tag(t.clone()));
+                        if !self.collapsed.contains(&format!("tag:{t}")) {
+                            for f in self.feeds.feeds.iter().filter(|f| f.has_tag(&t)) {
+                                rows.push(TreeRow::Feed(
+                                    f.url.clone(),
+                                    f.display_name().to_string(),
+                                    4,
+                                ));
+                            }
+                        }
                     }
                 }
                 "Feeds" => {
                     for f in self.feeds.feeds.iter() {
-                        rows.push(TreeRow::Feed(f.url.clone(), f.display_name().to_string()));
+                        rows.push(TreeRow::Feed(f.url.clone(), f.display_name().to_string(), 2));
                     }
                 }
                 _ => {}
@@ -257,7 +279,7 @@ impl App {
             TreeRow::ReadLater => Scope::ReadLater,
             TreeRow::Saved => Scope::Saved,
             TreeRow::Category(c) => Scope::Category(c.clone()),
-            TreeRow::Feed(url, _) => Scope::Feed(url.clone()),
+            TreeRow::Feed(url, _, _) => Scope::Feed(url.clone()),
             TreeRow::FavouriteFeed(url, _) => Scope::Feed(url.clone()),
             TreeRow::Tag(t) => Scope::Tag(t.clone()),
             TreeRow::Favourite => Scope::AllUnread,
@@ -279,7 +301,7 @@ impl App {
                 TreeRow::ReadLater => Scope::ReadLater,
                 TreeRow::Saved => Scope::Saved,
                 TreeRow::Category(c) => Scope::Category(c),
-                TreeRow::Feed(url, _) => Scope::Feed(url),
+                TreeRow::Feed(url, _, _) => Scope::Feed(url),
                 TreeRow::FavouriteFeed(url, _) => Scope::Feed(url),
                 TreeRow::Tag(t) => Scope::Tag(t),
                 TreeRow::Favourite => Scope::AllUnread,
@@ -559,7 +581,7 @@ impl App {
     }
 
     fn delete_selected_feed(&mut self) {
-        if let Some(TreeRow::Feed(url, name)) = self.tree_rows.get(self.tree_sel).cloned() {
+        if let Some(TreeRow::Feed(url, name, _)) = self.tree_rows.get(self.tree_sel).cloned() {
             self.feeds.remove(&url);
             self.save_urls();
             self.rebuild_tree();
@@ -837,7 +859,7 @@ impl App {
                         .tree_rows
                         .get(self.tree_sel)
                         .map(|r| match r {
-                            TreeRow::Feed(_, n) => n.clone(),
+                            TreeRow::Feed(_, n, _) => n.clone(),
                             _ => String::new(),
                         })
                         .unwrap_or_default();
@@ -847,7 +869,7 @@ impl App {
             KeyCode::Char('R') if self.focus == 0 => self.start_input(InputMode::RenameCategory),
             // T: edit tags of the selected feed (nav)
             KeyCode::Char('T') if self.focus == 0 => {
-                if let Some(TreeRow::Feed(url, _)) = self.tree_rows.get(self.tree_sel).cloned() {
+                if let Some(TreeRow::Feed(url, _, _)) = self.tree_rows.get(self.tree_sel).cloned() {
                     self.edit_tags_url = Some(url);
                     self.start_input(InputMode::EditTags);
                 }
@@ -865,7 +887,7 @@ impl App {
 
     /// Toggle favourite on the selected feed row (persists to urls file).
     fn toggle_favourite_feed(&mut self) {
-        let Some(TreeRow::Feed(url, _)) = self.tree_rows.get(self.tree_sel).cloned() else {
+        let Some(TreeRow::Feed(url, _, _)) = self.tree_rows.get(self.tree_sel).cloned() else {
             return;
         };
         let new_state = {
@@ -910,54 +932,105 @@ impl App {
         }
     }
 
-    /// Nav left: feed → fold its parent category / favourite section;
-    /// expanded category → collapse; else → first row (root).
+    /// Nav left: expanded node → fold; folded node → fold its parent;
+    /// feed → fold its containing container; top-level folded → stay.
     fn nav_left(&mut self) {
-        match self.tree_rows.get(self.tree_sel).cloned() {
-            Some(TreeRow::Feed(url, _)) => {
-                let cat = self
-                    .feeds
-                    .feeds
-                    .iter()
-                    .find(|f| f.url == url)
-                    .and_then(|f| f.category())
-                    .map(str::to_string);
-                if let Some(c) = cat {
-                    self.collapsed.insert(c.clone());
+        let Some(row) = self.tree_rows.get(self.tree_sel).cloned() else {
+            return;
+        };
+        match row {
+            TreeRow::Section(name) => {
+                // top-level: expanded → fold; folded → stay
+                if !self.collapsed.contains(&name) {
+                    self.collapsed.insert(name);
+                    self.rebuild_tree();
+                }
+            }
+            TreeRow::Favourite => {
+                if self.fav_expanded {
+                    self.fav_expanded = false;
+                    self.rebuild_tree();
+                }
+            }
+            TreeRow::Category(cat) => {
+                if !self.collapsed.contains(&cat) {
+                    self.collapsed.insert(cat);
+                    self.rebuild_tree();
+                } else {
+                    // fold the Categories section (parent)
+                    self.collapsed.insert("Categories".to_string());
                     self.rebuild_tree();
                     if let Some(idx) = self
                         .tree_rows
                         .iter()
-                        .position(|r| matches!(r, TreeRow::Category(x) if *x == c))
+                        .position(|r| matches!(r, TreeRow::Section(n) if n == "Categories"))
                     {
                         self.tree_sel = idx;
                     }
-                } else {
-                    self.tree_sel = 0;
                 }
             }
-            Some(TreeRow::FavouriteFeed(_, _)) => {
-                self.fav_expanded = false;
-                self.rebuild_tree();
-                if let Some(idx) = self.tree_rows.iter().position(|r| matches!(r, TreeRow::Favourite)) {
-                    self.tree_sel = idx;
-                }
-            }
-            Some(TreeRow::Category(cat)) => {
-                if self.collapsed.contains(&cat) {
-                    self.tree_sel = 0;
-                } else {
-                    self.collapsed.insert(cat);
+            TreeRow::Tag(t) => {
+                let key = format!("tag:{t}");
+                if !self.collapsed.contains(&key) {
+                    self.collapsed.insert(key);
                     self.rebuild_tree();
+                } else {
+                    // fold the Tags section (parent)
+                    self.collapsed.insert("Tags".to_string());
+                    self.rebuild_tree();
+                    if let Some(idx) = self
+                        .tree_rows
+                        .iter()
+                        .position(|r| matches!(r, TreeRow::Section(n) if n == "Tags"))
+                    {
+                        self.tree_sel = idx;
+                    }
                 }
             }
-            _ => self.tree_sel = 0,
+            TreeRow::Feed(_, _, _) | TreeRow::FavouriteFeed(_, _) => {
+                // fold the nearest container above this row
+                for j in (0..self.tree_sel).rev() {
+                    match &self.tree_rows[j] {
+                        TreeRow::Category(c) => {
+                            self.collapsed.insert(c.clone());
+                            self.rebuild_tree();
+                            self.tree_sel = j;
+                            return;
+                        }
+                        TreeRow::Tag(t) => {
+                            self.collapsed.insert(format!("tag:{t}"));
+                            self.rebuild_tree();
+                            self.tree_sel = j;
+                            return;
+                        }
+                        TreeRow::Favourite => {
+                            self.fav_expanded = false;
+                            self.rebuild_tree();
+                            self.tree_sel = j;
+                            return;
+                        }
+                        TreeRow::Section(n) => {
+                            self.collapsed.insert(n.clone());
+                            self.rebuild_tree();
+                            self.tree_sel = j;
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            // Unread / Read Later / Saved: no fold, stay
+            _ => {}
         }
     }
 
-    /// Nav right: collapsed category/favourite → expand; else descend into scope.
+    /// Nav right: collapsed section/category/favourite → expand; else descend.
     fn nav_right(&mut self) {
         match self.tree_rows.get(self.tree_sel).cloned() {
+            Some(TreeRow::Section(name)) if self.collapsed.contains(&name) => {
+                self.collapsed.remove(&name);
+                self.rebuild_tree();
+            }
             Some(TreeRow::Section(_)) => {}
             Some(TreeRow::Category(cat)) if self.collapsed.contains(&cat) => {
                 self.collapsed.remove(&cat);
@@ -965,6 +1038,10 @@ impl App {
             }
             Some(TreeRow::Favourite) if !self.fav_expanded => {
                 self.fav_expanded = true;
+                self.rebuild_tree();
+            }
+            Some(TreeRow::Tag(t)) if self.collapsed.contains(&format!("tag:{t}")) => {
+                self.collapsed.remove(&format!("tag:{t}"));
                 self.rebuild_tree();
             }
             Some(row) => self.select_scope(&row),
@@ -1097,12 +1174,15 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
     let mut items: Vec<ListItem> = Vec::new();
     for (i, row) in app.tree_rows.iter().enumerate() {
         let (text, style) = match row {
-            TreeRow::Section(name) => (
-                name.clone(),
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            TreeRow::Section(name) => {
+                let prefix = if app.collapsed.contains(name) { "▸" } else { "▾" };
+                (
+                    format!("{prefix} {name}"),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )
+            }
             TreeRow::AllUnread => {
                 let n = app.db.total_unread().unwrap_or(0);
                 (format!("Unread ({n})"), Style::default().add_modifier(Modifier::BOLD))
@@ -1129,7 +1209,7 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                 let n = f
                     .map(|x| app.db.unread_count(&x.url).unwrap_or(0))
                     .unwrap_or(0);
-                (format!("  ♥ {name} ({n})"), Style::default())
+                (format!("  {name} ({n})"), Style::default())
             }
             TreeRow::Category(cat) => {
                 let n: usize = app
@@ -1139,11 +1219,11 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                     .map(|f| app.db.unread_count(&f.url).unwrap_or(0))
                     .sum();
                 let prefix = if app.collapsed.contains(cat) { "▸" } else { "▾" };
-                (format!("{prefix} {cat} ({n})"), Style::default())
+                (format!("  {prefix} {cat} ({n})"), Style::default())
             }
-            TreeRow::Feed(url, name) => {
+            TreeRow::Feed(url, name, indent) => {
                 let n = app.db.unread_count(url).unwrap_or(0);
-                (format!("  {name} ({n})"), Style::default())
+                (format!("{}{} ({n})", " ".repeat(*indent as usize), name), Style::default())
             }
             TreeRow::Tag(t) => {
                 let n = app
@@ -1152,7 +1232,12 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                     .iter()
                     .filter(|f| f.has_tag(t))
                     .count();
-                (format!("# {t} ({n})"), Style::default())
+                let prefix = if app.collapsed.contains(&format!("tag:{t}")) {
+                    "▸"
+                } else {
+                    "▾"
+                };
+                (format!("  {prefix} {t} ({n})"), Style::default())
             }
         };
         let item = ListItem::new(text);
@@ -1182,7 +1267,16 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &App) {
     for (i, (url, item)) in app.scoped_items.iter().enumerate() {
         let read = app.db.is_read(url, &item.guid).unwrap_or(false);
         let marker = if read { " " } else { "•" };
-        let text = format!("{marker} {}", item.display_title());
+        let flags = if item.saved && item.read_later {
+            " [SL]"
+        } else if item.saved {
+            " [S]"
+        } else if item.read_later {
+            " [L]"
+        } else {
+            ""
+        };
+        let text = format!("{marker} {}{flags}", item.display_title());
         let mut li = ListItem::new(text);
         if i == app.list_sel {
             let style = if app.focus == 1 {
@@ -1216,7 +1310,27 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &App) {
     );
 }
 
-fn draw_article(frame: &mut Frame, area: Rect, app: &App) {
+
+/// Build the styled article body Text (HTML → markdown → styled spans).
+fn render_article_text(app: &App, item: &Item) -> ratatui::text::Text<'static> {
+    let md = app.article_markdown_display(item);
+    if md.trim().is_empty() {
+        return Text::from(""); // caller falls back to the fetch hint
+    }
+    let link_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::UNDERLINED);
+    let img_style = Style::default().fg(Color::DarkGray);
+    let renderer = the_other_tui_markdown::RendererBuilder::new()
+        .with_link(move |alt, _url| {
+            vec![Span::styled(alt.to_string(), link_style)]
+        })
+        .with_image(move |_alt, _url| {
+            vec![Span::styled("[img]", img_style)]
+        })
+        .build();
+    the_other_tui_markdown::into_text_with_renderer(&md, &renderer)
+}
+
+fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     let Some((url, item)) = app.current_item() else {
         frame.render_widget(
             Paragraph::new("select an article")
@@ -1254,11 +1368,20 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         "unread"
     };
+    let flags_mark = if item.saved && item.read_later {
+        " [SL]"
+    } else if item.saved {
+        " [S]"
+    } else if item.read_later {
+        " [L]"
+    } else {
+        ""
+    };
 
     let header_text = Text::from(vec![
         Line::from(Span::styled(item.display_title(), title_style)),
         Line::from(Span::styled(
-            format!("{feed_name}  ·  {}  ·  {read_mark}", fmt_date(&item.date)),
+            format!("{feed_name}  ·  {}  ·  {read_mark}{flags_mark}", fmt_date(&item.date)),
             meta_style,
         )),
         Line::from(Span::styled(item.url.clone(), dim_style)),
@@ -1279,21 +1402,19 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &App) {
     // (eilmeldung-style pipeline: html2md + the_other_tui_markdown).
     // Links render as underlined alt text (no URL); images as [img].
     let body_text = if content_ready {
-        let md = app.article_markdown_display(&item);
-        if md.trim().is_empty() {
-            Text::from(format!("[summary only — press enter to fetch full article{fetching_hint}]"))
+        // reuse the rendered body when the item hasn't changed
+        if let Some((g, t)) = &app.article_render {
+            if g == &item.guid {
+                t.clone()
+            } else {
+                let t = render_article_text(app, &item);
+                app.article_render = Some((item.guid.clone(), t.clone()));
+                t
+            }
         } else {
-            let link_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::UNDERLINED);
-            let img_style = Style::default().fg(Color::DarkGray);
-            let renderer = the_other_tui_markdown::RendererBuilder::new()
-                .with_link(move |alt, _url| {
-                    vec![Span::styled(alt.to_string(), link_style)]
-                })
-                .with_image(move |_alt, _url| {
-                    vec![Span::styled("[img]", img_style)]
-                })
-                .build();
-            the_other_tui_markdown::into_text_with_renderer(&md, &renderer)
+            let t = render_article_text(app, &item);
+            app.article_render = Some((item.guid.clone(), t.clone()));
+            t
         }
     } else {
         Text::from(format!("[summary only — press enter to fetch full article{fetching_hint}]"))
