@@ -10,7 +10,7 @@ Progress per branch (rust / go / cpp). `##` = spec, `###` = branch. Each branch 
 - [x] Phase 2: Feed source — newsboat `urls` parser, categories from tags, quoted title = display name
 - [x] Phase 3: State — read status persistence, All Unread aggregation
 - [x] Phase 4: Nav tree — categories → feeds, nested categories, h/l collapse, feed/category CRUD (rewrites urls file)
-- [x] Phase 5: Reading flow — summary in header, enter = read + full content, fetch on demand, n/p/j/k/ctrl+u/ctrl+d keys
+- [x] Phase 5: Reading flow — summary in header, enter = read + full content, fetch on demand, n/p/j/k/ctrl+u/ctrl+d/space keys
 - [x] Phase 6: Refresh — startup auto + `r` manual, feed-rs, threaded, error handling
 - [x] Phase 7: Export — `e` → frontmatter + full content markdown, `<category>/<slug>.md`
 - [x] Phase 8: Cache — gzipped HTML + TTL cleanup config
@@ -24,7 +24,7 @@ MVP complete — pending user review + archive.
 - [x] Phase 2: Feed source — newsboat `urls` parser (category + `#tags`), quoted title = display name
 - [x] Phase 3: State — read status persistence, All Unread aggregation
 - [x] Phase 4: Nav pane — virtual nodes (Unread/Read Later/Favourite/Saved) + Categories tree (nested) + Tags list, h/l collapse, category CRUD (rewrites urls file)
-- [x] Phase 5: Reading flow — left/right nav (h/l/q/enter/esc/←/→): expand→list→article+read→fetch full; n/p/j/k keys
+- [x] Phase 5: Reading flow — left/right nav (h/l/q/enter/esc/←/→): expand→list→article+read→fetch full; n/p/j/k/space keys
 - [x] Phase 6: Refresh — startup auto + `r` manual, gofeed, error handling
 - [x] Phase 7: Export — `e` → frontmatter + full content markdown, title-slug filename
 - [x] Phase 8: Cache — gzipped HTML + metadata, TTL cleanup config
@@ -36,7 +36,7 @@ MVP complete — pending user review + archive.
 - [ ] Phase 2: Feed source — newsboat `urls` parser (category + `#tags`), quoted title = display name
 - [ ] Phase 3: State — read status persistence, All Unread aggregation
 - [ ] Phase 4: Nav pane — virtual nodes (Unread/Read Later/Favourite/Saved) + Categories tree (nested) + Tags list, h/l collapse, category CRUD (rewrites urls file)
-- [ ] Phase 5: Reading flow — left/right nav (h/l/q/enter/esc/←/→): expand→list→article+read→fetch full; n/p/j/k keys
+- [ ] Phase 5: Reading flow — left/right nav (h/l/q/enter/esc/←/→): expand→list→article+read→fetch full; n/p/j/k/space keys
 - [ ] Phase 6: Refresh — startup auto + `r` manual, libcurl, error handling
 - [ ] Phase 7: Export — `e` → frontmatter + full content markdown, title-slug filename
 - [ ] Phase 8: Cache — gzipped HTML + metadata, TTL cleanup config
@@ -46,21 +46,21 @@ MVP complete — pending user review + archive.
 
 ### rust
 
-- [ ] Phase 1: Config file parse — JSON / JSONC / TOML / YAML by extension; keys `cache_ttl_days` / `export_dir` / `pane_ratio` / `theme` / `browser` / `refresh` / `nav_pane` / `images`
+- [ ] Phase 1: Config file parse — JSON / JSONC / TOML / YAML by extension; keys `cache_ttl_days` / `export_dir` / `pane_ratio` / `theme` / `browser` / `refresh` / `nav_pane` / `images` / `foldlevel`
 - [ ] Phase 2: Wire config — cache TTL purge, export path, pane widths, browser, refresh behavior
 - [ ] Phase 3: Theme file load + defaults + XDG fallbacks when keys absent
 - [ ] Phase 4: Nav pane layouts — full + simple, `t` toggle, `nav_pane` override
 
 ### go
 
-- [ ] Phase 1: Config file parse — JSON / JSONC / TOML / YAML by extension; keys `cache_ttl_days` / `export_dir` / `pane_ratio` / `theme` / `browser` / `refresh` / `nav_pane` / `images`
+- [ ] Phase 1: Config file parse — JSON / JSONC / TOML / YAML by extension; keys `cache_ttl_days` / `export_dir` / `pane_ratio` / `theme` / `browser` / `refresh` / `nav_pane` / `images` / `foldlevel`
 - [ ] Phase 2: Wire config — cache TTL purge, export path, pane widths, browser, refresh behavior
 - [ ] Phase 3: Theme file load + defaults + XDG fallbacks when keys absent
 - [ ] Phase 4: Nav pane layouts — full + simple, `t` toggle, `nav_pane` override
 
 ### cpp
 
-- [ ] Phase 1: Config file parse — JSON / JSONC / TOML / YAML by extension; keys `cache_ttl_days` / `export_dir` / `pane_ratio` / `theme` / `browser` / `refresh` / `nav_pane` / `images`
+- [ ] Phase 1: Config file parse — JSON / JSONC / TOML / YAML by extension; keys `cache_ttl_days` / `export_dir` / `pane_ratio` / `theme` / `browser` / `refresh` / `nav_pane` / `images` / `foldlevel`
 - [ ] Phase 2: Wire config — cache TTL purge, export path, pane widths, browser, refresh behavior
 - [ ] Phase 3: Theme file load + defaults + XDG fallbacks when keys absent
 - [ ] Phase 4: Nav pane layouts — full + simple, `t` toggle, `nav_pane` override
@@ -117,11 +117,14 @@ MVP complete — pending user review + archive.
 ### rust
 - [ ] Phase 1: OPML import — nested folders → nested categories, `category` attr → feed tags
 - [ ] Phase 2: OPML export — categories → nested folders, tags → `category` attr (round-trip)
+- [ ] Phase 3: Vim keys — `gg`/`G`, `Ctrl+f/b`, `zt/zz/zb`, `{/}`, `[/]`, `/` modal search (n next), `gi` image toggle; copy `yy/yn/yf`; sort `st/sn/sf/su` push (last pressed = highest, keep last 3) + `S` reverse + `sort` config init; `foldlevel` + `sort` config
 
 ### go
 - [ ] Phase 1: OPML import — nested folders → nested categories, `category` attr → feed tags
 - [ ] Phase 2: OPML export — categories → nested folders, tags → `category` attr (round-trip)
+- [ ] Phase 3: Vim keys — `gg`/`G`, `Ctrl+f/b`, `zt/zz/zb`, `{/}`, `[/]`, `/` modal search (n next), `gi` image toggle; copy `yy/yn/yf`; sort `st/sn/sf/su` push (last pressed = highest, keep last 3) + `S` reverse + `sort` config init; `foldlevel` + `sort` config
 
 ### cpp
 - [ ] Phase 1: OPML import — nested folders → nested categories, `category` attr → feed tags
 - [ ] Phase 2: OPML export — categories → nested folders, tags → `category` attr (round-trip)
+- [ ] Phase 3: Vim keys — `gg`/`G`, `Ctrl+f/b`, `zt/zz/zb`, `{/}`, `[/]`, `/` modal search (n next), `gi` image toggle; copy `yy/yn/yf`; sort `st/sn/sf/su` push (last pressed = highest, keep last 3) + `S` reverse + `sort` config init; `foldlevel` + `sort` config

@@ -14,7 +14,7 @@ Three-pane TUI RSS reader: browse feeds, store posts as markdown on command.
 - Category vs tags: each feed has exactly one category (tree placement) + 0..n `#tags` (optional); categories nest (cat/subcat), tags flat
 - Navigation: `h/l`, `q/enter/esc`, `←/→` for left/right — right: folded category→expand, expanded category/feed→list, item→article+read, article→fetch full; left: go back one level
 - Reading flow: refresh stores summary only; list nav → article header shows summary; `<enter>` list → open + mark read; `<enter>` article pane → fetch full article (never auto-fetch)
-- Keys: `o` browser / `e` export / `u` toggle-read in list+article panes; `A` mark-all-read; article pane `n/p` next/prev item (marks read), `j/k` scroll, `<c-u>/<c-d>` half-page
+- Keys: `o` browser / `e` export / `u` toggle-read in list+article panes; `A` mark-all-read; article pane `n/p` next/prev item (marks read), `j/k` scroll, `<c-u>/<c-d>` half-page; `<space>` list toggle read + go next
 - Category CRUD in TUI (create/rename/delete, assign feed); feed CRUD
 - Refresh: auto on startup + `r` manual
 - Export: YAML frontmatter (title/link/date/feed) + full content; default `$XDG_DATA_HOME/markerss/<category>/<slug>.md` (uncategorized → `markerss/<slug>.md`); markdown generated only at export time
@@ -47,7 +47,7 @@ User-configurable app settings via a config file.
 ### What We're Building
 - Config file at `$XDG_CONFIG_HOME/markerss/config`, separate from `urls` subscriptions file
 - Format: JSON, JSONC, TOML, or YAML — detected by extension (`.json`/`.jsonc`/`.toml`/`.yaml`/`.yml`); plain `config` defaults to one (TOML)
-- Keys: `cache_ttl_days` (startup purge), `export_dir` (export location), `pane_ratio` (three-pane widths, e.g. 0.15/0.15/0.7), `theme` (standalone color file), `browser` (which browser to open), `refresh` (auto-on-startup on/off, interval), `nav_presets` (list of nav section arrays, e.g. `[["Unread", "Feeds"], ["Unread", "Later"]]`), `images` (kitty image render on/off)
+- Keys: `cache_ttl_days` (startup purge), `export_dir` (export location), `pane_ratio` (three-pane widths, e.g. 0.15/0.15/0.7), `theme` (standalone color file), `browser` (which browser to open), `refresh` (auto-on-startup on/off, interval), `nav_presets` (list of nav section arrays, e.g. `[["Unread", "Feeds"], ["Unread", "Later"]]`), `images` (kitty image render on/off), `foldlevel` (initial nav fold depth, default open), `sort` (initial sort stack, ordered array max 3, e.g. `["unread", "time"]`; keypresses never modify config)
 - Optional: `fetch_timeout`, `max_items_per_feed`, `proxy`, `keybindings`, `default_view`
 - Nav pane: multiple layout presets, each preset = array of sections; one default full preset (Unread/Read Later/Favourite/Categories/Tags/Saved); `nav_presets` replaces the list (first = initial); `t` cycles presets (wrap)
 - Defaults when keys absent; XDG fallbacks per spec
@@ -123,7 +123,12 @@ Advanced functions: OPML mapping with nested categories, more keys (details TBD 
   - Folder hierarchy (nested `<outline>` without `xmlUrl`) → category hierarchy — **nested categories supported** (folder/subfolder → category/subcategory)
   - `category` attribute (comma-separated) → feed tags
 - Export mirrors mapping: categories → nested folders, tags → `category` attr
-- More keys (TBD by user)
+- Vim-like keys: `gg` / `G` top/end; `zr`/`zm` fold ±1, `zR`/`zM` unfold all/fold all — nav pane (also list); `Ctrl+f`/`Ctrl+b` full page; `zt`/`zz`/`zb` scroll cursor; `{`/`}` paragraph jump; `[`/`]` section jump (h2/h3 headings)
+- `/` modal search in list: while active `n` = next match (search owns `n`); esc exits
+- Copy keys: `yy` item URL, `yn` item title, `yf` feed URL
+- Sort: `st`/`sn`/`sf`/`su` push sort level — **last pressed = highest priority** (front of array): `st` → `["time"]`, then `sf` → `["feed", "time"]`; keep only last 3 (oldest dropped); `S` reverse; keypresses never modify config (config = init only)
+- Image toggle key: `gi` (was `g` — frees `g` for `gg` top)
+- `foldlevel` config — initial fold depth in nav pane (0 = all folded, large = all open)
 
 ### Decisions
 | Decision | Choice | Rationale | Date |
@@ -131,3 +136,7 @@ Advanced functions: OPML mapping with nested categories, more keys (details TBD 
 | OPML folders | → nested categories | preserves tree structure | 2026-08 |
 | OPML category attr | → feed tags | OPML has no multi-tag; comma-separated | 2026-08 |
 | Nested categories | supported in tree | deep hierarchies | 2026-08 |
+| Vim keys | `gg`/`G`, `Ctrl+f/b`, `zt/zz/zb`, `{/}`, `[/]`; `/` modal search; `gi` image toggle | vim familiarity | 2026-08 |
+| Copy keys | `yy`/`yn`/`yf` | fast capture | 2026-08 |
+| Sort | `st/sn/sf/su` push levels, last pressed = highest (keep last 3); `S` reverse; `sort` config = init | N-level ordering | 2026-08 |
+| Foldlevel | `foldlevel` config, initial nav fold depth | open/closed default | 2026-08 |

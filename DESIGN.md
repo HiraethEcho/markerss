@@ -131,6 +131,7 @@ Left/right movement via `h`/`l`, `q`/`enter`/`esc`, and arrow keys (`←`/`→`)
 | u | list+article | toggle read/unread |
 | A | list | mark all unread in view read |
 | <c-u>/<c-d> | article | scroll half page |
+| <space> | list | toggle read + move to next item |
 | a | nav | add feed (URL → title → category → tags prompts) |
 | d | nav | delete feed (press twice to confirm) |
 | R | nav | rename category |
@@ -140,8 +141,19 @@ Left/right movement via `h`/`l`, `q`/`enter`/`esc`, and arrow keys (`←`/`→`)
 | r | global | refresh |
 | ? | global | help (floating scrollable window) |
 | f | article | link jump — highlight links, 1-9/letter hints, press key to open in browser |
-| g | article | toggle kitty image render |
+| gi | article | toggle kitty image render |
 | t | nav | toggle nav pane layout (Full ↔ Simple; disabled when `nav_pane` set) |
+| gg / G | nav+list | jump top / bottom |
+| Ctrl+f / Ctrl+b | list+article | full page down / up |
+| zt / zz / zb | article | scroll cursor top / center / bottom |
+| { / } | article | jump prev / next paragraph |
+| [ / ] | article | jump prev / next section (h2/h3) |
+| / | list | modal search — n = next match, esc exits |
+| zr / zm / zR / zM | nav | fold level ±1 / open all / close all |
+| yy / yn | list+article | copy item URL / title |
+| yf | list+nav | copy feed URL |
+| st / sn / sf / su | list | push sort level: time / title / feed / unread-first (last pressed = highest; keep last 3) |
+| S | list | reverse sort order |
 
 ### Decisions
 
@@ -173,6 +185,8 @@ Left/right movement via `h`/`l`, `q`/`enter`/`esc`, and arrow keys (`←`/`→`)
   - `refresh` — auto-on-startup on/off, interval (`interval_minutes`).
   - `nav_presets` — list of nav section arrays, e.g. `[["Unread", "Feeds"], ["Unread", "Later"]]`; replaces the preset list (first = initial).
   - `images` — kitty image render on/off.
+  - `foldlevel` — initial fold depth of nav Categories tree (0 = all folded).
+  - `sort` — initial sort stack (max 3), e.g. `["unread", "time"]`, applied left-to-right; never rewritten by keypresses.
   - `fetch_timeout` — per-request timeout.
   - `max_items_per_feed` — cap items kept per feed.
   - `proxy` — HTTP proxy.
@@ -286,7 +300,26 @@ Left/right movement via `h`/`l`, `q`/`enter`/`esc`, and arrow keys (`←`/`→`)
 - **Export**: reverse — categories (incl. nested) → nested folders; feed tags → `category` attr (comma-joined).
 - Round-trip preserves hierarchy + tags.
 
-(TBD — more advanced functions/keys by user)
+(more advanced functions/keys TBD by user)
+
+### Vim-like Keys
+
+- `gg` / `G` — jump to top / bottom (nav + list).
+- `zr` / `zm` — decrease / increase fold level by 1 (unfold/fold one level).
+- `zR` / `zM` — open all folds / close all folds.
+- `Ctrl+f` / `Ctrl+b` — full page down / up (list + article).
+- `zt` / `zz` / `zb` — scroll cursor to top / center / bottom (article).
+- `{` / `}` — jump prev / next paragraph (blank line) (article).
+- `[` / `]` — jump prev / next section (article headings h2/h3).
+- `/` — modal search in list pane; while active `n` = next match, `esc` exits; search owns `n` only in search mode.
+- `gi` — toggle kitty image render (was `g`; `g` freed for `gg` top).
+- `yy` / `yn` — copy item URL / title (list + article). `yf` — copy feed URL.
+- `st` / `sn` / `sf` / `su` — push a sort level (time / title / feed / unread-first). **Last pressed = highest priority** (front of array): `st` → `["time"]`, then `sf` → `["feed", "time"]`.
+- Keep only the last 3 presses — a 4th drops the oldest.
+- `S` — reverse the full ordering.
+- Keypresses affect in-memory sort only — **config file is never modified**; `sort` config array (max 3) = initial stack, applied left-to-right (first = highest priority).
+- `foldlevel` config — initial fold depth of nav Categories tree: `0` = all folded, `N` = levels 1..N open.
+- Folding applies to Categories tree (nested); flat sections (Tags, virtual nodes) unaffected.
 
 ### Decisions
 
