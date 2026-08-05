@@ -50,8 +50,12 @@ pub fn refresh_feed(url: &str, timeout_secs: u64) -> Result<Vec<Item>, String> {
             let title = e.title.map(|t| t.content).unwrap_or_default();
             let url = e.links.first().map(|l| l.href.clone()).unwrap_or_default();
             let summary = e.summary.map(|s| s.content).unwrap_or_default();
-            // summary only on refresh — full content fetched on demand
-            let content = String::new();
+            // keep the feed-provided content (arrives with the feed, no extra
+            // request); full-article fetch may later replace it
+            let content = e
+                .content
+                .and_then(|c| c.body)
+                .unwrap_or_default();
             let date = e
                 .published
                 .or(e.updated)

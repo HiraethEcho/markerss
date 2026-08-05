@@ -63,7 +63,8 @@ impl Db {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, 0, 0)",
             )?;
             let mut upd = tx.prepare(
-                "UPDATE items SET title = ?3, url = ?4, summary = ?5, date = ?6
+                "UPDATE items SET title = ?3, url = ?4, summary = ?5, date = ?6,
+                        content = CASE WHEN content = '' THEN ?7 ELSE content END
                  WHERE feed_url = ?1 AND guid = ?2",
             )?;
             for i in items {
@@ -79,7 +80,7 @@ impl Db {
                 if n > 0 {
                     added.push(i.guid.clone());
                 }
-                upd.execute(rusqlite::params![feed_url, i.guid, i.title, i.url, i.summary, i.date])?;
+                upd.execute(rusqlite::params![feed_url, i.guid, i.title, i.url, i.summary, i.date, i.content])?;
             }
         }
         tx.commit()?;
@@ -138,8 +139,11 @@ impl Db {
                 let read = if read_guids.contains(&i.guid) { 1 } else { 0 };
                 let later = if later_map.contains(&i.guid) { 1 } else { 0 };
                 let saved = if saved_map.contains(&i.guid) { 1 } else { 0 };
-                // keep previously fetched content; new items are summary-only
-                let content = content_map.get(&i.guid).cloned().unwrap_or_default();
+                // keep previously fetched content; otherwise use the feed content
+                let content = content_map
+                    .get(&i.guid)
+                    .cloned()
+                    .unwrap_or_else(|| i.content.clone());
                 ins.execute(rusqlite::params![
                     feed_url,
                     i.guid,
