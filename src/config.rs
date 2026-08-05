@@ -1,6 +1,6 @@
-//! App config: `$XDG_CONFIG_HOME/markerss/config` — format by extension.
+//! App config: `$XDG_CONFIG_HOME/markerss/config.toml` — format by extension.
 //!
-//! - `config` / `.toml` → TOML (default)
+//! - `config.toml` → TOML (default)
 //! - `.json` → JSON, `.jsonc` → JSON with comments stripped
 //! - `.yaml` / `.yml` → YAML
 //!
@@ -89,7 +89,7 @@ impl Config {
             config_dir: config_dir.clone(),
         };
 
-        if let Some(raw) = load_raw(&config_dir.join("config")) {
+        if let Some(raw) = load_raw(&config_dir.join("config.toml")) {
             cfg.apply(raw);
         }
         cfg
