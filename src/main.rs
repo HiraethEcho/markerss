@@ -49,6 +49,8 @@ enum InputMode {
     AddTags,
     EditTags,
     RenameCategory,
+    EditFeedTitle,
+    EditTag,
     ImportOpml,
 }
 
@@ -476,6 +478,8 @@ impl App {
                 "tags (space-separated, empty = none):".to_string()
             }
             InputMode::RenameCategory => "new category name:".to_string(),
+            InputMode::EditFeedTitle => "display title (empty = default):".to_string(),
+            InputMode::EditTag => "new tag name:".to_string(),
             InputMode::ImportOpml => "OPML file path:".to_string(),
         };
         let mut buf = String::new();
@@ -489,6 +493,16 @@ impl App {
                         .map(|t| format!("#{t}"))
                         .collect::<Vec<_>>()
                         .join(" ");
+                }
+            }
+        }
+        // prefill the current custom title when editing
+        if let InputMode::EditFeedTitle = &mode {
+            if let Some(url) = &self.edit_tags_url {
+                if let Some(f) = self.feeds.feeds.iter().find(|f| &f.url == url) {
+                    if f.custom_name {
+                        buf = f.title.clone().unwrap_or_default();
+                    }
                 }
             }
         }
@@ -578,6 +592,42 @@ impl App {
                     self.save_urls();
                     self.rebuild_tree();
                     self.status = format!("category {old} → {val}");
+                }
+            }
+            InputMode::EditFeedTitle => {
+                let url = self.edit_tags_url.take().unwrap_or_default();
+                if url.is_empty() {
+                    return;
+                }
+                if let Some(f) = self.feeds.feeds.iter_mut().find(|f| f.url == url) {
+                    if val.is_empty() {
+                        // clear the custom title — fall back to feed-provided name
+                        f.title = None;
+                        f.custom_name = false;
+                    } else {
+                        f.title = Some(val.clone());
+                        f.custom_name = true;
+                    }
+                }
+                self.save_urls();
+                self.rebuild_tree();
+                self.status = format!("title updated for {url}");
+            }
+            InputMode::EditTag => {
+                if val.is_empty() {
+                    self.status = "rename cancelled".into();
+                    return;
+                }
+                if let Some(TreeRow::Tag(old)) = self.tree_rows.get(self.tree_sel) {
+                    let old = old.clone();
+                    for f in self.feeds.feeds.iter_mut() {
+                        if let Some(slot) = f.feed_tags.iter_mut().find(|t| **t == old) {
+                            *slot = val.clone();
+                        }
+                    }
+                    self.save_urls();
+                    self.rebuild_tree();
+                    self.status = format!("tag {old} → {val}");
                 }
             }
             InputMode::ImportOpml => {
@@ -987,7 +1037,16 @@ impl App {
                     self.status = format!("press d again to delete {name}");
                 }
             }
-            KeyCode::Char('M') if self.focus == 0 => self.start_input(InputMode::RenameCategory),
+            // M: rename — category / tag / feed custom title
+            KeyCode::Char('M') if self.focus == 0 => match self.tree_rows.get(self.tree_sel) {
+                Some(TreeRow::Category(_)) => self.start_input(InputMode::RenameCategory),
+                Some(TreeRow::Tag(_)) => self.start_input(InputMode::EditTag),
+                Some(TreeRow::Feed(url, _, _)) => {
+                    self.edit_tags_url = Some(url.clone());
+                    self.start_input(InputMode::EditFeedTitle);
+                }
+                _ => {}
+            },
             // T: edit tags of the selected feed (nav)
             KeyCode::Char('T') if self.focus == 0 => {
                 if let Some(TreeRow::Feed(url, _, _)) = self.tree_rows.get(self.tree_sel).cloned() {
@@ -1636,7 +1695,7 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
     let text = Text::from(
         "Keys\n\
          ─────\n\
-         nav:   j/k move · h/l expand/collapse+descend · N add feed · d delete · M rename category · F favourite\n\
+         nav:   j/k move · h/l expand/collapse+descend · N add feed · d delete · M rename (category/tag/feed title) · F favourite\n\
          list:  j/k move · l/enter open (mark read)\n\
          article: j/k scroll · n/p item · ctrl+u/ctrl+d half page · l/enter fetch full\n\
          left:  h/q/esc — article→list→nav→parent\n\
