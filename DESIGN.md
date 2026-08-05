@@ -322,7 +322,7 @@ Advanced keys (planned, unbound or remapped — see Advanced): `gg/G`, `Ctrl+f/b
 - `Ctrl+f` / `Ctrl+b` — full page down / up (list + article).
 - `zt` / `zz` / `zb` — scroll cursor to top / center / bottom (article).
 - `{` / `}` — jump prev / next paragraph (blank line) (article).
-- `[` / `]` — jump prev / next section (article headings h2/h3).
+- `[` / `]` — jump prev / next section (article headings h2/h3 etc).
 - `/` — modal search in list pane; while active `n` = next match, `esc` exits; search owns `n` only in search mode.
 - `gi` — toggle kitty image render (was `g`; `g` freed for `gg` top).
 - `yy` / `yn` — copy item URL / title (list + article). `yf` — copy feed URL.

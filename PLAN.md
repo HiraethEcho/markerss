@@ -120,16 +120,16 @@ Tags & Favorites complete (rust). No per-item tags (decided).
 ## advanced
 
 ### rust
-- [ ] Phase 1: OPML import — nested folders → nested categories, `category` attr → feed tags
+- [ ] Phase 1: OPML import — nested folders → `cat/subcat` categories, `category` attr → feed tags
 - [ ] Phase 2: OPML export — categories → nested folders, tags → `category` attr (round-trip)
 - [ ] Phase 3: Vim keys — `gg`/`G`, `Ctrl+f/b`, `zt/zz/zb`, `{/}`, `[/]`, `/` modal search (n next), `gi` image toggle; copy `yy/yn/yf`; sort `st/sn/sf/su` push (last pressed = highest, keep last 3) + `S` reverse + `sort` config init; `foldlevel` + `sort` config
 
 ### go
-- [ ] Phase 1: OPML import — nested folders → nested categories, `category` attr → feed tags
+- [ ] Phase 1: OPML import — nested folders → `cat/subcat` categories, `category` attr → feed tags
 - [ ] Phase 2: OPML export — categories → nested folders, tags → `category` attr (round-trip)
 - [ ] Phase 3: Vim keys — `gg`/`G`, `Ctrl+f/b`, `zt/zz/zb`, `{/}`, `[/]`, `/` modal search (n next), `gi` image toggle; copy `yy/yn/yf`; sort `st/sn/sf/su` push (last pressed = highest, keep last 3) + `S` reverse + `sort` config init; `foldlevel` + `sort` config
 
 ### cpp
-- [ ] Phase 1: OPML import — nested folders → nested categories, `category` attr → feed tags
+- [ ] Phase 1: OPML import — nested folders → `cat/subcat` categories, `category` attr → feed tags
 - [ ] Phase 2: OPML export — categories → nested folders, tags → `category` attr (round-trip)
 - [ ] Phase 3: Vim keys — `gg`/`G`, `Ctrl+f/b`, `zt/zz/zb`, `{/}`, `[/]`, `/` modal search (n next), `gi` image toggle; copy `yy/yn/yf`; sort `st/sn/sf/su` push (last pressed = highest, keep last 3) + `S` reverse + `sort` config init; `foldlevel` + `sort` config

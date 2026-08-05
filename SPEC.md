@@ -10,7 +10,7 @@ Three-pane TUI RSS reader: browse feeds, store posts as markdown on command.
 ### What We're Building
 - Three-pane TUI: nav pane / list pane (item list) / article pane
 - Nav pane: All Unread / Read Later / Favourite / Saved virtual nodes + Categories tree (nested categories; uncategorized feeds at root) + Tags list
-- Feed sources: newsboat `urls` format (`url "custom title" category #tag1 #tag2`); quoted title = custom display name
+- Feed sources: newsboat `urls` format (`url "custom title" cat/subcat #tag1 #tag2`); category = slash path → nested tree (mirrors OPML folder structure); quoted title = custom display name
 - Category vs tags: each feed has exactly one category (tree placement) + 0..n `#tags` (optional); categories nest (cat/subcat), tags flat
 - Navigation: `h`/`q`/`esc` go LEFT (article→list→nav; in nav: fold, then fold parent); `l`/`enter` go RIGHT (folded entry→expand + jump to first child; expanded node/feed→list; item→article+read; article→always fetch full content)
 - Nav structure: top entries (Unread / Read Later / Favourite / Categories / Tags / Saved / Feeds / No Category) — Unread, Saved, Read Later have no fold; Categories/Tags/Favourite/Feeds/No Category fold; per-tag fold; expanding a fold jumps to its first child; left on expanded header folds, left again folds parent, top folded stays; all top entries highlighted
@@ -125,7 +125,7 @@ Advanced functions: OPML mapping with nested categories, more keys (details TBD 
 
 ### What We're Building
 - OPML import mapping:
-  - Folder hierarchy (nested `<outline>` without `xmlUrl`) → category hierarchy — **nested categories supported** (folder/subfolder → category/subcategory)
+  - Folder hierarchy (nested `<outline>` without `xmlUrl`) → category hierarchy — folder/subfolder → `cat/subcat` in urls; **nested categories supported**
   - `category` attribute (comma-separated) → feed tags
 - Export mirrors mapping: categories → nested folders, tags → `category` attr
 - Vim-like keys: `gg` / `G` top/end; `zr`/`zm` fold ±1, `zR`/`zM` unfold all/fold all — nav pane (also list); `Ctrl+f`/`Ctrl+b` full page; `zt`/`zz`/`zb` scroll cursor; `{`/`}` paragraph jump; `[`/`]` section jump (h2/h3 headings)
