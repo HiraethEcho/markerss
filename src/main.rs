@@ -79,6 +79,7 @@ struct App {
     collapsed: std::collections::HashSet<String>,
     preset_idx: usize,
     fav_expanded: bool,
+    uncat_expanded: bool,
     tree_sel: usize,
     tree_rows: Vec<TreeRow>,
 
@@ -119,6 +120,8 @@ enum TreeRow {
     Saved,
     Favourite,
     FavouriteFeed(String, String), // url, display name
+    Uncategorized,
+    UncategorizedFeed(String, String), // url, display name
     Category(String),
     Feed(String, String, u8), // url, display name, indent
     Tag(String),
@@ -136,6 +139,7 @@ impl App {
             collapsed: Default::default(),
             preset_idx: 0,
             fav_expanded: true,
+            uncat_expanded: true,
             tree_sel: 0,
             tree_rows: Vec::new(),
             scope: Scope::AllUnread,
@@ -237,6 +241,16 @@ impl App {
                             }
                         }
                     }
+                    // uncategorized feeds as their own foldable top node
+                    rows.push(TreeRow::Uncategorized);
+                    if self.uncat_expanded {
+                        for f in self.feeds.uncategorized() {
+                            rows.push(TreeRow::UncategorizedFeed(
+                                f.url.clone(),
+                                f.display_name().to_string(),
+                            ));
+                        }
+                    }
                 }
                 "Tags" => {
                     for t in self.feeds.all_feed_tags() {
@@ -285,8 +299,9 @@ impl App {
             TreeRow::Category(c) => Scope::Category(c.clone()),
             TreeRow::Feed(url, _, _) => Scope::Feed(url.clone()),
             TreeRow::FavouriteFeed(url, _) => Scope::Feed(url.clone()),
+            TreeRow::UncategorizedFeed(url, _) => Scope::Feed(url.clone()),
             TreeRow::Tag(t) => Scope::Tag(t.clone()),
-            TreeRow::Favourite => Scope::AllUnread,
+            TreeRow::Favourite | TreeRow::Uncategorized => Scope::AllUnread,
         };
         self.list_sel = 0;
         self.rebuild_list();
@@ -307,8 +322,9 @@ impl App {
                 TreeRow::Category(c) => Scope::Category(c),
                 TreeRow::Feed(url, _, _) => Scope::Feed(url),
                 TreeRow::FavouriteFeed(url, _) => Scope::Feed(url),
+                TreeRow::UncategorizedFeed(url, _) => Scope::Feed(url),
                 TreeRow::Tag(t) => Scope::Tag(t),
-                TreeRow::Favourite => Scope::AllUnread,
+                TreeRow::Favourite | TreeRow::Uncategorized => Scope::AllUnread,
             };
             self.list_sel = 0;
             self.rebuild_list();
@@ -1029,6 +1045,12 @@ impl App {
                     self.rebuild_tree();
                 }
             }
+            TreeRow::Uncategorized => {
+                if self.uncat_expanded {
+                    self.uncat_expanded = false;
+                    self.rebuild_tree();
+                }
+            }
             TreeRow::Category(cat) => {
                 if !self.collapsed.contains(&cat) {
                     self.collapsed.insert(cat);
@@ -1064,7 +1086,9 @@ impl App {
                     }
                 }
             }
-            TreeRow::Feed(_, _, _) | TreeRow::FavouriteFeed(_, _) => {
+            TreeRow::Feed(_, _, _)
+            | TreeRow::FavouriteFeed(_, _)
+            | TreeRow::UncategorizedFeed(_, _) => {
                 // fold the nearest container above this row
                 for j in (0..self.tree_sel).rev() {
                     match &self.tree_rows[j] {
@@ -1082,6 +1106,12 @@ impl App {
                         }
                         TreeRow::Favourite => {
                             self.fav_expanded = false;
+                            self.rebuild_tree();
+                            self.tree_sel = j;
+                            return;
+                        }
+                        TreeRow::Uncategorized => {
+                            self.uncat_expanded = false;
                             self.rebuild_tree();
                             self.tree_sel = j;
                             return;
@@ -1115,6 +1145,10 @@ impl App {
             }
             Some(TreeRow::Favourite) if !self.fav_expanded => {
                 self.fav_expanded = true;
+                self.rebuild_tree();
+            }
+            Some(TreeRow::Uncategorized) if !self.uncat_expanded => {
+                self.uncat_expanded = true;
                 self.rebuild_tree();
             }
             Some(TreeRow::Tag(t)) if self.collapsed.contains(&format!("tag:{t}")) => {
@@ -1286,7 +1320,15 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                 let prefix = if app.fav_expanded { "▾" } else { "▸" };
                 (format!("{prefix} Favourite ({n})"), Style::default().add_modifier(Modifier::BOLD))
             }
-            TreeRow::FavouriteFeed(_, name) => {
+            TreeRow::Uncategorized => {
+                let n = app.feeds.uncategorized().len();
+                let prefix = if app.uncat_expanded { "▾" } else { "▸" };
+                (
+                    format!("{prefix} No Category ({n})"),
+                    Style::default().add_modifier(Modifier::BOLD),
+                )
+            }
+            TreeRow::FavouriteFeed(_, name) | TreeRow::UncategorizedFeed(_, name) => {
                 let f = app
                     .feeds
                     .feeds
@@ -1327,6 +1369,21 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
             }
         };
         let item = ListItem::new(text);
+        // top-level entries get a highlight fg (yellow) on top of their base style
+        let is_top = matches!(
+            row,
+            TreeRow::Section(_)
+                | TreeRow::AllUnread
+                | TreeRow::ReadLater
+                | TreeRow::Saved
+                | TreeRow::Favourite
+                | TreeRow::Uncategorized
+        );
+        let base = if is_top {
+            style.patch(Style::default().fg(Color::Yellow))
+        } else {
+            style
+        };
         // patch selection into the row style so base styles (bold etc.) survive
         let row_style = if i == app.tree_sel {
             if app.focus == 0 {
@@ -1337,7 +1394,7 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             Style::default()
         };
-        items.push(item.style(style.patch(row_style)));
+        items.push(item.style(base.patch(row_style)));
     }
     frame.render_widget(
         List::new(items).block(pane_block("Nav", app.focus == 0)),
