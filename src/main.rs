@@ -1554,7 +1554,7 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                     .map(|f| app.db.unread_count(&f.url).unwrap_or(0))
                     .sum();
                 let prefix = if app.collapsed.contains(cat) { "▸" } else { "▾" };
-                let indent = cat.matches('/').count() * 2;
+                let indent = cat.matches('/').count() * 2 + 2;
                 (format!("{}{prefix} {cat} ({n})", " ".repeat(indent)), Style::default())
             }
             TreeRow::Feed(url, name, indent) => {
