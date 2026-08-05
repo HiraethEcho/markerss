@@ -19,7 +19,7 @@ Each branch rebases on main and implements all five specs, in order MVP → Conf
 `$XDG_CONFIG_HOME/markerss/urls` — newsboat format: `URL "custom title" category #tag1 #tag2`; quoted title = display name.
 
 ### Config
-`$XDG_CONFIG_HOME/markerss/config` — JSON / JSONC / TOML / YAML (by extension); keys `cache_ttl_days`, `export_dir`, refresh behavior.
+`$XDG_CONFIG_HOME/markerss/config.toml` — JSON / JSONC / TOML / YAML (by extension; plain `config` fallback); keys `cache_ttl_days`, `export_dir`, refresh behavior.
 
 ### State & Cache
 - DB: `$XDG_CACHE_HOME/markerss/markerss.db` (items + content + read flags)
