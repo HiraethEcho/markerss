@@ -55,10 +55,10 @@ Config complete (rust).
 
 ### go
 
-- [ ] Phase 1: Config file parse — JSON / JSONC / TOML / YAML by extension; keys `cache_ttl_days` / `export_dir` / `pane_ratio` / `theme` / `browser` / `refresh` / `nav_pane` / `images` / `foldlevel`
-- [ ] Phase 2: Wire config — cache TTL purge, export path, pane widths, browser, refresh behavior
-- [ ] Phase 3: Theme file load + defaults + XDG fallbacks when keys absent
-- [ ] Phase 4: Nav pane layouts — full + simple, `t` toggle, `nav_pane` override
+- [x] Phase 1: Config file parse — JSON / JSONC / TOML / YAML by extension; keys `cache_ttl_days` / `export_dir` / `pane_ratio` / `theme` / `browser` / `refresh` / `nav_pane` / `images` / `foldlevel`
+- [x] Phase 2: Wire config — cache TTL purge, export path, pane widths, browser, refresh behavior
+- [x] Phase 3: Theme file load + defaults + XDG fallbacks when keys absent
+- [x] Phase 4: Nav pane layouts — full + simple, `t` toggle, `nav_pane` override (implemented as `nav_presets`)
 
 ### cpp
 
