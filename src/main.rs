@@ -234,14 +234,27 @@ impl App {
                     }
                 }
                 "Categories" => {
-                    for cat in self.feeds.categories() {
-                        rows.push(TreeRow::Category(cat.clone()));
-                        if !self.collapsed.contains(&cat) {
-                            for f in self.feeds.by_category(&cat) {
+                    for path in self.feeds.categories_tree() {
+                        let joined = path.join("/");
+                        let depth = path.len();
+                        // hidden when any ancestor is collapsed
+                        let mut ancestor_folded = false;
+                        for i in 1..depth {
+                            if self.collapsed.contains(&path[..i].join("/")) {
+                                ancestor_folded = true;
+                                break;
+                            }
+                        }
+                        if ancestor_folded {
+                            continue;
+                        }
+                        rows.push(TreeRow::Category(joined.clone()));
+                        if !self.collapsed.contains(&joined) {
+                            for f in self.feeds.by_category_path(&path) {
                                 rows.push(TreeRow::Feed(
                                     f.url.clone(),
                                     f.display_name().to_string(),
-                                    4,
+                                    (depth * 2 + 2) as u8,
                                 ));
                             }
                         }
@@ -585,11 +598,7 @@ impl App {
                 }
                 if let Some(TreeRow::Category(old)) = self.tree_rows.get(self.tree_sel) {
                     let old = old.clone();
-                    for f in self.feeds.feeds.iter_mut() {
-                        if f.category() == Some(old.as_str()) {
-                            f.tags[0] = val.clone();
-                        }
-                    }
+                    self.feeds.rename_category(&old, &val);
                     self.save_urls();
                     self.rebuild_tree();
                     self.status = format!("category {old} → {val}");
@@ -1197,10 +1206,21 @@ impl App {
             }
             TreeRow::Category(cat) => {
                 if !self.collapsed.contains(&cat) {
-                    self.collapsed.insert(cat);
+                    self.collapsed.insert(cat.clone());
                     self.rebuild_tree();
+                } else if let Some(parent) = cat.rfind('/').map(|i| cat[..i].to_string()) {
+                    // already folded — fold the parent category instead
+                    self.collapsed.insert(parent.clone());
+                    self.rebuild_tree();
+                    if let Some(idx) = self
+                        .tree_rows
+                        .iter()
+                        .position(|r| matches!(r, TreeRow::Category(c) if c == &parent))
+                    {
+                        self.tree_sel = idx;
+                    }
                 } else {
-                    // fold the Categories section (parent)
+                    // top-level folded category — fold the Categories section
                     self.collapsed.insert("Categories".to_string());
                     self.rebuild_tree();
                     if let Some(idx) = self
@@ -1534,7 +1554,8 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                     .map(|f| app.db.unread_count(&f.url).unwrap_or(0))
                     .sum();
                 let prefix = if app.collapsed.contains(cat) { "▸" } else { "▾" };
-                (format!("  {prefix} {cat} ({n})"), Style::default())
+                let indent = cat.matches('/').count() * 2;
+                (format!("{}{prefix} {cat} ({n})", " ".repeat(indent)), Style::default())
             }
             TreeRow::Feed(url, name, indent) => {
                 let n = app.db.unread_count(url).unwrap_or(0);
