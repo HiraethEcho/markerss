@@ -51,6 +51,41 @@ impl Db {
         Ok(Db { conn })
     }
 
+    /// Fetch-mode upsert: insert new items, update metadata of existing ones,
+    /// preserve read/content/flags. Returns the guids of newly added items.
+    pub fn upsert_fetch(&mut self, feed_url: &str, items: &[Item]) -> rusqlite::Result<Vec<String>> {
+        let mut added = Vec::new();
+        let tx = self.conn.transaction()?;
+        {
+            let mut ins = tx.prepare(
+                "INSERT OR IGNORE INTO items
+                 (feed_url, guid, title, url, summary, content, date, read, read_later, saved)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, 0, 0)",
+            )?;
+            let mut upd = tx.prepare(
+                "UPDATE items SET title = ?3, url = ?4, summary = ?5, date = ?6
+                 WHERE feed_url = ?1 AND guid = ?2",
+            )?;
+            for i in items {
+                let n = ins.execute(rusqlite::params![
+                    feed_url,
+                    i.guid,
+                    i.title,
+                    i.url,
+                    i.summary,
+                    i.content,
+                    i.date
+                ])?;
+                if n > 0 {
+                    added.push(i.guid.clone());
+                }
+                upd.execute(rusqlite::params![feed_url, i.guid, i.title, i.url, i.summary, i.date])?;
+            }
+        }
+        tx.commit()?;
+        Ok(added)
+    }
+
     /// Keep `guid`-keyed read flags across a refresh (delete+insert would lose them).
     pub fn replace_feed_items_preserving_read(
         &mut self,
@@ -380,5 +415,44 @@ mod flag_tests {
         d.replace_feed_items_preserving_read("f", &[item("x")]).unwrap();
         assert_eq!(d.items_with_flag("saved").unwrap().len(), 0);
         std::fs::remove_file(&path).ok();
+    }
+}
+
+#[cfg(test)]
+mod upsert_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+
+    fn db() -> Db {
+        let p = std::env::temp_dir().join(format!("markerss-upsert-{}-{}.db", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+        let _ = std::fs::remove_file(&p);
+        Db::open(&p).unwrap()
+    }
+
+    fn item(guid: &str, title: &str) -> Item {
+        Item { guid: guid.into(), title: title.into(), url: String::new(), summary: String::new(), content: String::new(), date: "2026-01-01".into(), read_later: false, saved: false }
+    }
+
+    #[test]
+    fn upsert_adds_new_keeps_existing() {
+        let mut d = db();
+        d.replace_feed_items_preserving_read("f", &[item("a", "old title")]).unwrap();
+        d.set_read("f", "a", true).unwrap();
+        d.set_flag("f", "a", "saved", true).unwrap();
+        d.update_item_content("f", "a", "<p>content</p>").unwrap();
+        // fetch: new guid b added, a updated metadata only
+        let added = d.upsert_fetch("f", &[item("a", "new title"), item("b", "new")]).unwrap();
+        assert_eq!(added, vec!["b"]);
+        let items = d.items_for_feed("f").unwrap();
+        assert_eq!(items.len(), 2);
+        let a = items.iter().find(|i| i.guid == "a").unwrap();
+        assert_eq!(a.title, "new title"); // metadata updated
+        assert!(d.is_read("f", "a").unwrap()); // read preserved
+        assert_eq!(d.items_with_flag("saved").unwrap().len(), 1); // flag preserved
+        let a2 = items.iter().find(|i| i.guid == "a").unwrap();
+        assert_eq!(a2.content, "<p>content</p>"); // content preserved
+        let b = items.iter().find(|i| i.guid == "b").unwrap();
+        assert!(!d.is_read("f", "b").unwrap()); // new item unread
     }
 }
