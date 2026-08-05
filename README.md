@@ -26,7 +26,7 @@ Each branch rebases on main and implements all five specs, in order MVP → Conf
 - Export: `$XDG_DATA_HOME/markerss/<category>/<slug>.md` (uncategorized → root)
 
 ### Keys
-`?` in-app help. Core: nav `j/k h/l enter`, article `n/p j/k ctrl+u ctrl+d enter`, `o` browser, `e` export, `u` read toggle, `A` mark-all-read, `r` refresh, `a/d/R` feed/category CRUD, `i/x` OPML, `f` link jump, `g` image toggle, `t` nav layout toggle.
+`?` in-app help. Core: nav `j/k h/l enter`, article `n/p j/k ctrl+u ctrl+d enter`, `o` browser, `e` export, `u` read toggle, `A` mark-all-read, `r` refresh, `a/d/R` feed/category CRUD, `f` link jump, `g` image toggle, `t` nav layout toggle.
 
 ## Build & Run (per branch)
 

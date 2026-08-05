@@ -9,9 +9,9 @@ Three-pane TUI RSS reader: browse feeds, store posts as markdown on command.
 
 ### What We're Building
 - Three-pane TUI: nav pane / list pane (item list) / article pane
-- Nav pane: All Unread / Read Later / Favourite / Saved virtual nodes + Categories tree (uncategorized feeds at root) + Tags list
-- Feed sources: newsboat `urls` format primary (`url "custom title" category #tag1 #tag2`) + OPML file; quoted title = custom display name; OPML import/export
-- Category vs tags: each feed has exactly one category (tree placement) + 0..n `#tags` (optional)
+- Nav pane: All Unread / Read Later / Favourite / Saved virtual nodes + Categories tree (nested categories; uncategorized feeds at root) + Tags list
+- Feed sources: newsboat `urls` format (`url "custom title" category #tag1 #tag2`); quoted title = custom display name
+- Category vs tags: each feed has exactly one category (tree placement) + 0..n `#tags` (optional); categories nest (cat/subcat), tags flat
 - Navigation: `h/l`, `q/enter/esc`, `←/→` for left/right — right: folded category→expand, expanded category/feed→list, item→article+read, article→fetch full; left: go back one level
 - Reading flow: refresh stores summary only; list nav → article header shows summary; `<enter>` list → open + mark read; `<enter>` article pane → fetch full article (never auto-fetch)
 - Keys: `o` browser / `e` export / `u` toggle-read in list+article panes; `A` mark-all-read; article pane `n/p` next/prev item (marks read), `j/k` scroll, `<c-u>/<c-d>` half-page
@@ -29,11 +29,10 @@ Three-pane TUI RSS reader: browse feeds, store posts as markdown on command.
 | Branch strategy | main = design docs only; parallel impl branches rebase on main | Single design source, parallel impl | 2026-08 |
 | Persistence | SQLite (items + content + read flags) | Single-file, queryable, preserves state across refresh | 2026-08 |
 | Layout | 3 panes: nav tree / item list / article | Mirrors mail-client pattern | 2026-08 |
-| Tree | Categories → feeds, uncategorized at root, h/l collapse | File-tree mental model | 2026-08 |
+| Tree | Categories → feeds, uncategorized at root, h/l collapse, nested categories | File-tree mental model | 2026-08 |
 | Keys | Vim keys + arrows both bound; h/l/q/enter/esc/←/→ for left/right | Familiarity; explicit nav semantics | 2026-08 |
-| Feed source | newsboat `urls` format + OPML file, read live | Zero migration; coexists with newsboat; single source of truth | 2026-08 |
+| Feed source | newsboat `urls` format, read live | Zero migration; coexists with newsboat; single source of truth | 2026-08 |
 | Category vs tags | one category (tree placement) + multi `#tags` (optional) | category = structure, tags = cross-cutting | 2026-08 |
-| OPML | Import/export + accepted as feed list source | Interop with other readers | 2026-08 |
 | Article flow | List enter = open + read; article enter = fetch full only (no auto-fetch) | Fetch only on explicit action; summary-only until opened | 2026-08 |
 | Storage | SQLite in cache dir; summary-only on refresh; fetched content preserved | Bandwidth/storage efficient; TTL configurable | 2026-08 |
 | Rendering | strategy per-language; shared behavioral contract | each branch picks its own pipeline | 2026-08 |
@@ -117,4 +116,18 @@ Comfortable long-form reading in the article pane — typography, spacing, eleme
 ## Advanced
 
 ### Goal
-(TBD — user writes details later: advanced functions, more keys, etc.)
+Advanced functions: OPML mapping with nested categories, more keys (details TBD by user).
+
+### What We're Building
+- OPML import mapping:
+  - Folder hierarchy (nested `<outline>` without `xmlUrl`) → category hierarchy — **nested categories supported** (folder/subfolder → category/subcategory)
+  - `category` attribute (comma-separated) → feed tags
+- Export mirrors mapping: categories → nested folders, tags → `category` attr
+- More keys (TBD by user)
+
+### Decisions
+| Decision | Choice | Rationale | Date |
+|---|---|---|---|
+| OPML folders | → nested categories | preserves tree structure | 2026-08 |
+| OPML category attr | → feed tags | OPML has no multi-tag; comma-separated | 2026-08 |
+| Nested categories | supported in tree | deep hierarchies | 2026-08 |

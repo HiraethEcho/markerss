@@ -14,9 +14,11 @@ Three panes:
 │ Read Later (n)       │ 2. item title        │   title             │
 │ Favourite (n)        │ 3. item title        │   feed · date · url │
 │ ▾ Categories         │ ...                  │   summary           │
-│   ▸ category         │                      │─────────────────────│
-│     feed (12)        │                      │ content:            │
-│ ▾ Tags               │                      │   full content      │
+│   ▾ cat1             │                      │─────────────────────│
+│     ▸ subcat1        │                      │ content:            │
+│       feed1          │                      │   full content      │
+│   ▸ cat2             │                      │                     │
+│ ▾ Tags               │                      │                     │
 │   tag1               │                      │                     │
 │   tag2               │                      │                     │
 │ Saved (n)            │                      │                     │
@@ -27,7 +29,7 @@ Nav pane structure, top to bottom:
 - `All Unread` — virtual node, all items unread-first.
 - `Read Later` — virtual node, items flagged `read_later`.
 - `Favourite` — virtual node, items flagged `favorite`.
-- `Categories` — tree: categories → feeds. Unread count per feed in parens. Uncategorized feeds at root.
+- `Categories` — tree: categories → subcategories → feeds, **nested to any depth**. Unread count per feed in parens. Uncategorized feeds at root.
 - `Tags` — flat list of feed tags (`#tag`).
 - `Saved` — virtual node, items flagged `saved` (kept in DB, no markdown).
 - Article pane split: header (meta + summary) + content (full content only). Body never repeats the summary.
@@ -35,8 +37,8 @@ Nav pane structure, top to bottom:
 
 ### Feed Source
 
-Feed list from two sources, both read live:
-- newsboat `urls` format (primary, single source of truth):
+Feed list from one source, read live:
+- newsboat `urls` format (single source of truth):
 
   ```
   https://example.com "custom title" category #tag1 #tag2 #tag3
@@ -45,7 +47,6 @@ Feed list from two sources, both read live:
   - First non-`#` token = **category** (single — tree placement).
   - `#tag` tokens = **tags** (multi, optional) — shown in tags strip.
   - Quoted string = **custom display name** (overrides feed-provided title). NOT hidden.
-- OPML file — accepted as a feed list source, plus import/export for interop.
 
 - TUI category/feed CRUD rewrites the urls file.
 
@@ -57,7 +58,7 @@ Left/right movement via `h`/`l`, `q`/`enter`/`esc`, and arrow keys (`←`/`→`)
 - **Right** (`l` / `enter` / `→`):
   - virtual node (All Unread / Read Later / Favourite / Saved) → list pane (its items)
   - folded category → expand it
-  - expanded category → list pane (all items in category)
+  - expanded category with children → descend into subcategory on `j/k`; right → list pane (all items in category incl. subcats)
   - feed → list pane (all items in that feed)
   - tag → list pane (items from feeds carrying it)
   - item in list → article pane + mark read
@@ -133,7 +134,6 @@ Left/right movement via `h`/`l`, `q`/`enter`/`esc`, and arrow keys (`←`/`→`)
 | a | nav | add feed (URL → title → category → tags prompts) |
 | d | nav | delete feed (press twice to confirm) |
 | R | nav | rename category |
-| i / x | global | import / export OPML |
 | F | global | toggle full-screen focus on article pane |
 | Q | global | quit app |
 | Tab / Shift+Tab | global | focus next / prev pane |
@@ -150,11 +150,10 @@ Left/right movement via `h`/`l`, `q`/`enter`/`esc`, and arrow keys (`←`/`→`)
 | Branch strategy | main = design docs only; parallel impl branches rebase on main | Single design source, parallel impl | 2026-08 |
 | Persistence | SQLite (items + content + read flags) | Single-file, queryable, preserves state across refresh | 2026-08 |
 | Layout | 3 panes: nav tree / item list / article | Mirrors mail-client pattern | 2026-08 |
-| Tree | Virtual nodes (Unread/Read Later/Favourite/Saved) + Categories tree + Tags list | single nav pane, mail-client pattern | 2026-08 |
+| Tree | Virtual nodes (Unread/Read Later/Favourite/Saved) + Categories tree (nested) + Tags list | single nav pane, mail-client pattern | 2026-08 |
 | Keys | Vim keys + arrows both bound; h/l/q/enter/esc/←/→ for left/right | Familiarity; explicit nav semantics | 2026-08 |
-| Feed source | newsboat `urls` format + OPML file, read live | Zero migration; coexists with newsboat; single source of truth | 2026-08 |
+| Feed source | newsboat `urls` format, read live | Zero migration; coexists with newsboat; single source of truth | 2026-08 |
 | Category vs tags | one category (tree placement) + multi `#tags` (optional) | category = structure, tags = cross-cutting | 2026-08 |
-| OPML | Import/export + accepted as feed list source | Interop with other readers | 2026-08 |
 | Article flow | List enter = open + read; article enter = fetch full only (no auto-fetch) | Fetch only on explicit action; summary-only until opened | 2026-08 |
 | Storage | SQLite in cache dir; summary-only on refresh; fetched content preserved | Bandwidth/storage efficient; TTL configurable | 2026-08 |
 | Rendering | strategy per-language; shared behavioral contract | each branch picks its own pipeline | 2026-08 |
@@ -279,4 +278,20 @@ Left/right movement via `h`/`l`, `q`/`enter`/`esc`, and arrow keys (`←`/`→`)
 
 ## Advanced
 
-(TBD — user writes details later: advanced functions, more keys, etc.)
+### OPML Mapping
+
+- **Import**:
+  - Nested `<outline>` without `xmlUrl` = folders → category hierarchy. Folder/subfolder → category/subcategory; **nested categories supported**.
+  - `type="rss"` outline = feed; `category` attribute (comma-separated) → feed tags; `text`/`title` → display name; `htmlUrl` kept.
+- **Export**: reverse — categories (incl. nested) → nested folders; feed tags → `category` attr (comma-joined).
+- Round-trip preserves hierarchy + tags.
+
+(TBD — more advanced functions/keys by user)
+
+### Decisions
+
+| Decision | Choice | Rationale | Date |
+|---|---|---|---|
+| OPML folders | → nested categories | preserves tree structure | 2026-08 |
+| OPML category attr | → feed tags | OPML has no multi-tag; comma-separated | 2026-08 |
+| Nested categories | supported in tree | deep hierarchies | 2026-08 |

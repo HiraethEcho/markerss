@@ -9,41 +9,38 @@ Progress per branch (rust / go / cpp). `##` = spec, `###` = branch. Each branch 
 - [x] Phase 1: Scaffold — cargo project, ratatui three-pane layout (nav/list/article), XDG dirs
 - [x] Phase 2: Feed source — newsboat `urls` parser, categories from tags, quoted title = display name
 - [x] Phase 3: State — read status persistence, All Unread aggregation
-- [x] Phase 4: Nav tree — categories → feeds, h/l collapse, feed/category CRUD (rewrites urls file)
+- [x] Phase 4: Nav tree — categories → feeds, nested categories, h/l collapse, feed/category CRUD (rewrites urls file)
 - [x] Phase 5: Reading flow — summary in header, enter = read + full content, fetch on demand, n/p/j/k/ctrl+u/ctrl+d keys
 - [x] Phase 6: Refresh — startup auto + `r` manual, feed-rs, threaded, error handling
 - [x] Phase 7: Export — `e` → frontmatter + full content markdown, `<category>/<slug>.md`
 - [x] Phase 8: Cache — gzipped HTML + TTL cleanup config
-- [x] Phase 9: OPML — import (`i`) + export (`x`)
-- [x] Phase 10: Polish — empty states, help bar (`?`), README usage
+- [x] Phase 9: Polish — empty states, help bar (`?`), README usage
 
 MVP complete — pending user review + archive.
 
 ### go
 
 - [x] Phase 1: Scaffold — go module, bubbletea skeleton, three-pane layout (nav/list/article), XDG dirs
-- [x] Phase 2: Feed source — newsboat `urls` parser (category + `#tags`) + OPML file, quoted title = display name
+- [x] Phase 2: Feed source — newsboat `urls` parser (category + `#tags`), quoted title = display name
 - [x] Phase 3: State — read status persistence, All Unread aggregation
-- [x] Phase 4: Nav pane — virtual nodes (Unread/Read Later/Favourite/Saved) + Categories tree + Tags list, h/l collapse, category CRUD (rewrites urls file)
+- [x] Phase 4: Nav pane — virtual nodes (Unread/Read Later/Favourite/Saved) + Categories tree (nested) + Tags list, h/l collapse, category CRUD (rewrites urls file)
 - [x] Phase 5: Reading flow — left/right nav (h/l/q/enter/esc/←/→): expand→list→article+read→fetch full; n/p/j/k keys
 - [x] Phase 6: Refresh — startup auto + `r` manual, gofeed, error handling
 - [x] Phase 7: Export — `e` → frontmatter + full content markdown, title-slug filename
 - [x] Phase 8: Cache — gzipped HTML + metadata, TTL cleanup config
-- [x] Phase 9: OPML — import + export + as feed list source
-- [x] Phase 10: Polish — empty states, spinner, help bar, README usage
+- [x] Phase 9: Polish — empty states, spinner, help bar, README usage
 
 ### cpp
 
 - [ ] Phase 1: Scaffold — build system, FTXUI skeleton, three-pane layout (nav/list/article), XDG dirs
-- [ ] Phase 2: Feed source — newsboat `urls` parser (category + `#tags`) + OPML file, quoted title = display name
+- [ ] Phase 2: Feed source — newsboat `urls` parser (category + `#tags`), quoted title = display name
 - [ ] Phase 3: State — read status persistence, All Unread aggregation
-- [ ] Phase 4: Nav pane — virtual nodes (Unread/Read Later/Favourite/Saved) + Categories tree + Tags list, h/l collapse, category CRUD (rewrites urls file)
+- [ ] Phase 4: Nav pane — virtual nodes (Unread/Read Later/Favourite/Saved) + Categories tree (nested) + Tags list, h/l collapse, category CRUD (rewrites urls file)
 - [ ] Phase 5: Reading flow — left/right nav (h/l/q/enter/esc/←/→): expand→list→article+read→fetch full; n/p/j/k keys
 - [ ] Phase 6: Refresh — startup auto + `r` manual, libcurl, error handling
 - [ ] Phase 7: Export — `e` → frontmatter + full content markdown, title-slug filename
 - [ ] Phase 8: Cache — gzipped HTML + metadata, TTL cleanup config
-- [ ] Phase 9: OPML — import + export + as feed list source
-- [ ] Phase 10: Polish — empty states, spinner, help bar, README usage
+- [ ] Phase 9: Polish — empty states, spinner, help bar, README usage
 
 ## config
 
@@ -118,10 +115,13 @@ MVP complete — pending user review + archive.
 ## advanced
 
 ### rust
-- [ ] TBD — details to be written by user
+- [ ] Phase 1: OPML import — nested folders → nested categories, `category` attr → feed tags
+- [ ] Phase 2: OPML export — categories → nested folders, tags → `category` attr (round-trip)
 
 ### go
-- [ ] TBD — details to be written by user
+- [ ] Phase 1: OPML import — nested folders → nested categories, `category` attr → feed tags
+- [ ] Phase 2: OPML export — categories → nested folders, tags → `category` attr (round-trip)
 
 ### cpp
-- [ ] TBD — details to be written by user
+- [ ] Phase 1: OPML import — nested folders → nested categories, `category` attr → feed tags
+- [ ] Phase 2: OPML export — categories → nested folders, tags → `category` attr (round-trip)
