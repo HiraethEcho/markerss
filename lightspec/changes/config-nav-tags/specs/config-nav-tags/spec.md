@@ -56,25 +56,9 @@ Given `nav_presets = [["Unread", "Feeds"], ["Unread", "Later"]]`, then the prese
 #### Scenario: t cycles presets
 Given multiple presets, then `t` cycles through them in order (wrap).
 
-### Requirement: Virtual nodes
-
-Read Later, Favourite and Saved SHALL appear as virtual nav nodes aggregating items with the corresponding flag, across all feeds, like All Unread.
-
-#### Scenario: aggregation
-Each virtual node aggregates items with its flag set, across all feeds — same pattern as All Unread.
-
-#### Scenario: toggle flags from article view
-`Y` toggles favourite, `L` toggles read-later, `S` toggles saved. Flags are independent; an item can carry several.
-
-#### Scenario: saved exempt from TTL
-Startup content purge skips items with `saved` set.
-
-#### Scenario: saved kept without markdown
-`saved` items stay in the DB with content; no markdown is generated for them unless exported.
-
 ### Requirement: Feed tags
 
-Feeds SHALL carry 0..n tags from `#tag` words in the urls file plus exactly one category (`#`-less words). The nav SHALL list feed tags below Categories; selecting a tag SHALL filter the list to feeds carrying it.
+Feeds SHALL carry 0..n tags from `#tag` words in the urls file plus exactly one category (`#`-less words). The nav SHALL list feed tags below Categories; selecting a tag SHALL filter the list to feeds carrying it. (No per-item tags.)
 
 #### Scenario: #tag in urls file
 Given line `https://x.com/f "T" category #tech #rust`, then the feed carries tags tech, rust plus category `category`.
@@ -85,12 +69,35 @@ The nav pane shows a Tags section (below Categories) listing all feed tags.
 #### Scenario: tag filters feeds
 Selecting a tag in nav filters the list to items of feeds carrying that tag.
 
-### Requirement: Item tags
+### Requirement: Feed favourite
 
-Items SHALL carry per-item tags, assignable from the article view via `T` + input, stored in the DB.
+Feeds SHALL carry a favourite flag, toggled with `f` on a nav feed row. The Favourite virtual node SHALL list favourited feeds (same presentation as the category tree). The flag persists in the urls file.
 
-#### Scenario: assign from article view
-`T` in the article pane opens an input; space-separated words become the item's tags; tags apply to the item only (not the feed).
+#### Scenario: favourite toggle from nav
+`f` on a feed row toggles that feed's favourite flag; the flag persists in the urls file.
+
+#### Scenario: favourite node lists feeds
+The Favourite node shows the favourited feeds; entering one opens its list.
+
+### Requirement: Virtual item nodes
+
+Read Later and Saved SHALL appear as virtual nav nodes aggregating items with the corresponding flag, across all feeds, like All Unread.
+
+#### Scenario: read-later / saved aggregation
+Each node aggregates items with its flag set, across all feeds.
+
+#### Scenario: toggle from article view
+`L` toggles read-later on the current item, `S` toggles saved. Flags are independent; an item can carry both.
+
+#### Scenario: saved exempt from TTL
+Startup content purge skips items with `saved` set.
+
+#### Scenario: saved kept without markdown
+`saved` items stay in the DB with content; no markdown is generated for them unless exported.
+
+### Requirement: Item flags persistence
+
+Item flags SHALL be stored in the DB per item and survive restart/refresh.
 
 #### Scenario: persisted per item
-Item tags are stored in the DB per item and survive restart/refresh.
+Item flags survive restart and feed refresh.

@@ -18,7 +18,8 @@
 ## 4. DB: flags + item tags
 - [ ] items table: `read_later`/`favorite`/`saved` INTEGER columns + `tags` TEXT
 - [ ] Set/get/toggle flag APIs; TTL cleanup `WHERE saved = 0`
-- [ ] Refresh preserves flags + item tags (extend preserve map)
+- [ ] Refresh preserves flags (extend preserve map)
+- [ ] Feed favourite flag round-trips through urls file
 
 ## 5. Virtual nodes
 - [ ] Scope::ReadLater / Favorite / Saved — aggregate by flag across feeds
@@ -29,11 +30,8 @@
 - [ ] Tags section in nav below Categories; selection filters feeds
 - [ ] CRUD preserves tags on rewrite
 
-## 7. Item tags from article
-- [ ] `T` in article → input modal → per-item tags; persisted
-
 ## 8. Flags keys
-- [ ] `Y`/`L`/`S` toggle favourite/read-later/saved in article view
+- [ ] `f` on nav feed row toggles favourite; `L`/`S` in article toggle read-later/saved
 
 ## 9. Verify
 - [ ] `cargo build` + `cargo test` green

@@ -71,15 +71,23 @@ preset list is replaced; the first entry becomes the initial preset.
 #### Scenario: t cycles presets
 Given multiple presets, then `t` cycles through them in order (wrap).
 
-### Virtual nodes (Read Later / Favourite / Saved)
+### Favourite (feed-level)
+
+#### Scenario: toggle from nav
+`f` on a feed row toggles that feed's favourite; persists in urls file.
+
+#### Scenario: Favourite node lists feeds
+Favourite = virtual node listing favourited feeds (like the category tree).
+
+### Read Later / Saved (item-level)
 
 #### Scenario: aggregation
-Each virtual node aggregates items with its flag set, across all feeds —
+Read Later / Saved aggregate items with their flag set, across all feeds —
 same pattern as All Unread.
 
-#### Scenario: toggle flags from article view
-`Y` toggles favourite, `L` toggles read-later, `S` toggles saved. Flags are
-independent; an item can carry several.
+#### Scenario: toggle from article view
+`L` toggles read-later, `S` toggles saved on the current item. Flags are
+independent; an item can carry both.
 
 #### Scenario: saved exempt from TTL
 Startup content purge skips items with `saved` set.
@@ -100,14 +108,6 @@ The nav pane shows a Tags section (below Categories) listing all feed tags.
 #### Scenario: tag filters feeds
 Selecting a tag in nav filters the list to items of feeds carrying that tag.
 
-### Item tags
-
-#### Scenario: assign from article view
-`T` in the article pane opens an input; space-separated words become the
-item's tags; tags apply to the item only (not the feed).
-
-#### Scenario: persisted per item
-Item tags are stored in the DB per item and survive restart/refresh.
 
 ## Out of Scope
 
