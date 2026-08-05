@@ -32,7 +32,11 @@ use crate::feedlist::{Feed, File};
 // ─── worker messages ────────────────────────────────────────────────────────
 
 enum Msg {
-    FeedRefreshed { url: String, result: Result<Vec<Item>, String> },
+    FeedRefreshed {
+        url: String,
+        result: Result<Vec<Item>, String>,
+        full: bool,
+    },
     ArticleFetched { url: String, guid: String, result: Result<String, String> },
     RefreshTick,
 }
@@ -320,7 +324,10 @@ impl App {
                 for f in &self.feeds.feeds {
                     if let Ok(list) = self.db.items_for_feed(&f.url) {
                         for i in list {
-                            items.push((f.url.clone(), i));
+                            // startup/refresh view = unread only
+                            if !self.db.is_read(&f.url, &i.guid).unwrap_or(false) {
+                                items.push((f.url.clone(), i));
+                            }
                         }
                     }
                 }
@@ -521,7 +528,7 @@ impl App {
                 self.save_urls();
                 self.rebuild_tree();
                 self.status = format!("added {url}");
-                self.refresh_feed_thread(url);
+                self.refresh_feed_thread(url, false);
             }
             InputMode::EditTags => {
                 let url = self.edit_tags_url.take().unwrap_or_default();
@@ -604,17 +611,20 @@ impl App {
 
     // ── refresh ───────────────────────────────────────────────────────────
 
-    fn refresh_feed_thread(&mut self, url: String) {
+    /// `full=true` (manual `r`): replace items + rebuild the list.
+    /// `full=false` (auto fetch): upsert new items only, append new unread
+    /// to the current list — never removes read articles.
+    fn refresh_feed_thread(&mut self, url: String, full: bool) {
         self.pending_refreshes += 1;
         let timeout = self.cfg.fetch_timeout;
         let tx = self.tx.clone();
         thread::spawn(move || {
             let result = fetch::refresh_feed(&url, timeout);
-            tx.send(Msg::FeedRefreshed { url, result }).ok();
+            tx.send(Msg::FeedRefreshed { url, result, full }).ok();
         });
     }
 
-    fn refresh_all(&mut self) {
+    fn refresh_all(&mut self, full: bool) {
         if self.pending_refreshes > 0 {
             return;
         }
@@ -623,28 +633,87 @@ impl App {
             self.status = "no feeds — add subscriptions to the urls file".into();
             return;
         }
-        self.status = format!("refreshing {} feeds…", urls.len());
+        self.status = if full {
+            format!("refreshing {} feeds…", urls.len())
+        } else {
+            format!("fetching new items from {} feeds…", urls.len())
+        };
         for url in urls {
-            self.refresh_feed_thread(url);
+            self.refresh_feed_thread(url, full);
         }
     }
 
-    fn handle_feed_refreshed(&mut self, url: String, result: Result<Vec<Item>, String>) {
+    fn handle_feed_refreshed(
+        &mut self,
+        url: String,
+        result: Result<Vec<Item>, String>,
+        full: bool,
+    ) {
         self.pending_refreshes = self.pending_refreshes.saturating_sub(1);
         match result {
             Ok(mut items) => {
                 if let Some(cap) = self.cfg.max_items_per_feed {
                     items.truncate(cap);
                 }
-                self.db.replace_feed_items_preserving_read(&url, &items).ok();
-                self.status = format!("refreshed {url} ({} items)", items.len());
+                if full {
+                    self.db.replace_feed_items_preserving_read(&url, &items).ok();
+                    self.status = format!("refreshed {url} ({} items)", items.len());
+                } else {
+                    let added = self.db.upsert_fetch(&url, &items).unwrap_or_default();
+                    self.status =
+                        format!("fetched {url} ({} new)", added.len());
+                    self.append_new_unread(&url, &added);
+                }
             }
             Err(e) => self.status = e,
         }
         if self.pending_refreshes == 0 {
             self.status.push_str(" — done");
         }
-        self.rebuild_list();
+        if full {
+            self.rebuild_list();
+        }
+    }
+
+    /// Append newly-fetched unread items to the current list (no reorder of
+    /// existing entries).
+    fn append_new_unread(&mut self, feed_url: &str, added: &[String]) {
+        if added.is_empty() {
+            return;
+        }
+        let in_scope = match &self.scope {
+            Scope::AllUnread => true,
+            Scope::Feed(u) => u == feed_url,
+            Scope::Category(c) => self.feeds.by_category(c).iter().any(|f| f.url == feed_url),
+            Scope::Tag(t) => self
+                .feeds
+                .feeds
+                .iter()
+                .any(|f| f.url == feed_url && f.has_tag(t)),
+            _ => false,
+        };
+        if !in_scope {
+            return;
+        }
+        let existing: std::collections::HashSet<String> = self
+            .scoped_items
+            .iter()
+            .map(|(_, i)| i.guid.clone())
+            .collect();
+        let mut fresh: Vec<(String, Item)> = Vec::new();
+        if let Ok(list) = self.db.items_for_feed(feed_url) {
+            for i in list {
+                if added.contains(&i.guid)
+                    && !existing.contains(&i.guid)
+                    && !self.db.is_read(feed_url, &i.guid).unwrap_or(false)
+                {
+                    fresh.push((feed_url.to_string(), i));
+                }
+            }
+        }
+        if !fresh.is_empty() {
+            self.scoped_items.splice(0..0, fresh);
+        }
     }
 
     fn handle_article_fetched(&mut self, url: String, guid: String, result: Result<String, String>) {
@@ -837,7 +906,7 @@ impl App {
             }
             KeyCode::Char('f') if self.focus == 0 => self.toggle_favourite_feed(),
             KeyCode::Char('?') => self.show_help = true,
-            KeyCode::Char('r') => self.refresh_all(),
+            KeyCode::Char('r') => self.refresh_all(true),
             KeyCode::Char('A') => self.mark_all_read(),
             KeyCode::Char('e') => {
                 if let Err(e) = self.export_markdown() {
@@ -1519,8 +1588,9 @@ fn main() -> io::Result<()> {
     let cfg = Config::load();
     let mut app = App::new(cfg);
     app.db.cleanup_content(app.cfg.cache_ttl_days).ok();
+    // startup: fetch new items (append-only) — never a full refresh
     if app.cfg.refresh_on_startup {
-        app.refresh_all();
+        app.refresh_all(false);
     }
     // interval auto-refresh
     if let Some(interval_min) = app.cfg.refresh_interval_minutes {
@@ -1551,11 +1621,11 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()>
         }
         while let Ok(msg) = app.rx.try_recv() {
             match msg {
-                Msg::FeedRefreshed { url, result } => app.handle_feed_refreshed(url, result),
+                Msg::FeedRefreshed { url, result, full } => app.handle_feed_refreshed(url, result, full),
                 Msg::ArticleFetched { url, guid, result } => {
                     app.handle_article_fetched(url, guid, result)
                 }
-                Msg::RefreshTick => app.refresh_all(),
+                Msg::RefreshTick => app.refresh_all(false),
             }
         }
     }
