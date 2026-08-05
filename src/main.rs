@@ -804,10 +804,12 @@ impl App {
             // right: l / enter — expand tree→list→article→fetch full
             KeyCode::Char('l') | KeyCode::Enter => self.go_right(),
             KeyCode::Char('Q') => self.running = false,
-            KeyCode::Char('F') => {
-                self.focus = 2;
+            // F: nav → favourite feed; article → fullscreen
+            KeyCode::Char('F') if self.focus == 0 => self.toggle_favourite_feed(),
+            KeyCode::Char('F') if self.focus == 2 => {
                 self.fullscreen = !self.fullscreen;
             }
+            KeyCode::Char('f') if self.focus == 0 => self.toggle_favourite_feed(),
             KeyCode::Char('?') => self.show_help = true,
             KeyCode::Char('r') => self.refresh_all(),
             KeyCode::Char('A') => self.mark_all_read(),
@@ -819,8 +821,6 @@ impl App {
             KeyCode::Char('o') => self.open_browser(),
             KeyCode::Char('u') => self.toggle_read(),
             KeyCode::Char('t') if self.focus == 0 => self.cycle_preset(),
-            // f: favourite the selected feed (nav)
-            KeyCode::Char('f') if self.focus == 0 => self.toggle_favourite_feed(),
             // L / S: item flags from list or article pane (toggle; again to cancel)
             KeyCode::Char('L') if self.focus >= 1 => self.toggle_item_flag("read_later"),
             KeyCode::Char('S') if self.focus >= 1 => self.toggle_item_flag("saved"),
