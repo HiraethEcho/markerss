@@ -46,10 +46,12 @@ MVP complete — pending user review + archive.
 
 ### rust
 
-- [ ] Phase 1: Config file parse — JSON / JSONC / TOML / YAML by extension; keys `cache_ttl_days` / `export_dir` / `pane_ratio` / `theme` / `browser` / `refresh` / `nav_pane` / `images` / `foldlevel`
-- [ ] Phase 2: Wire config — cache TTL purge, export path, pane widths, browser, refresh behavior
-- [ ] Phase 3: Theme file load + defaults + XDG fallbacks when keys absent
-- [ ] Phase 4: Nav pane layouts — full + simple, `t` toggle, `nav_pane` override
+- [x] Phase 1: Config file (`config.toml`) parse — JSON / JSONC / TOML / YAML by extension; keys `cache_ttl_days` / `export_dir` / `pane_ratio` / `theme` / `browser` / `refresh` / `nav_presets` / `images` / `proxy` / `keybindings` / `default_view` / `fetch_timeout` / `max_items_per_feed`
+- [x] Phase 2: Wire config — TTL purge, export path, pane widths, browser, refresh interval, fetch timeout, max items
+- [x] Phase 3: Nav presets — one full default (`[Unread, Read Later, Favourite, Categories, Tags, Saved]`), `nav_presets` override (first = initial), `t` cycles; No Category node; top entries highlighted
+- [x] Phase 4: default_view (`Feed:<url>` / `Category:<name>`); DB auto-migration for old schemas
+
+Config complete (rust).
 
 ### go
 
@@ -69,9 +71,12 @@ MVP complete — pending user review + archive.
 
 ### rust
 
-- [ ] Phase 1: Flags — per-item `read_later` / `favorite` / `saved` in DB, toggle from article view; virtual nodes Read Later / Favourite / Saved in nav
-- [ ] Phase 2: Tags list in nav pane (below Categories) — from feed `#tags`; select tag → filter list; assign tags to items from article view
-- [ ] Phase 3: Saved semantics — exempt from TTL cleanup, kept in DB without markdown
+- [x] Phase 1: Flags — per-item `read_later` / `saved` in DB, toggle from list+article (`L`/`S`); favourite = feed-level (`F` in nav, `!favourite` marker in urls file)
+- [x] Phase 2: Virtual nodes — Read Later / Saved aggregate items; Favourite lists favourited feeds; feed `#tags` in urls, per-tag fold + filter
+- [x] Phase 3: Saved semantics — exempt from TTL cleanup, kept in DB without markdown
+- [x] Phase 4: Read-later lifecycle — `L` marks unread; reading clears read-later; list snapshot keeps read items until manual refresh
+
+Tags & Favorites complete (rust). No per-item tags (decided).
 
 ### go
 

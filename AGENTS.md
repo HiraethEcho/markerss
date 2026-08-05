@@ -29,7 +29,7 @@ This repository's `main` branch is DESIGN-ONLY: markdown recording intent, roadm
 
 ### main
 
-Edit design docs on main → commit → each branch `git rebase main` → implement against DESIGN.md. Each branch implements ALL five specs, in order MVP → Config → Tags & Favorites → Article Polish → Advanced. Tick the branch's checkboxes in PLAN.md as phases complete.
+Edit design docs on main → commit → **rebase branches only when the user asks** (never auto-rebase) → implement against DESIGN.md. Each branch implements ALL five specs, in order MVP → Config → Tags & Favorites → Article Polish → Advanced. Tick the branch's checkboxes in PLAN.md as phases complete.
 
 ### dev branches
 

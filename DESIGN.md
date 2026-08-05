@@ -10,29 +10,47 @@ Three panes:
 
 ```
 ┌─ Nav ────────────────┬─ List ───────────────┬─ Article ───────────┐
-│ All Unread (n)       │ 1. item title        │ header:             │
-│ Read Later (n)       │ 2. item title        │   title             │
-│ Favourite (n)        │ 3. item title        │   feed · date · url │
-│ ▾ Categories         │ ...                  │   summary           │
-│   ▾ cat1             │                      │─────────────────────│
-│     ▸ subcat1        │                      │ content:            │
-│       feed1          │                      │   full content      │
-│   ▸ cat2             │                      │                     │
+│ Unread (5)           │ • item title [L]     │ header:             │
+│ Read Later (2)       │ • item title [S]     │   title             │
+│ ▾ Favourite (2)      │   read item          │   feed · date · url │
+│   feed1              │ ...                  │   summary           │
+│ ▾ Categories         │                      │─────────────────────│
+│   ▸ cat1             │                      │ content:            │
+│   ▾ cat2             │                      │   RSS body / blank  │
+│     feed2            │                      │   (list mode: empty)│
+│ ▾ No Category (1)    │                      │                     │
+│   feed-x             │                      │                     │
 │ ▾ Tags               │                      │                     │
-│   tag1               │                      │                     │
-│   tag2               │                      │                     │
-│ Saved (n)            │                      │                     │
+│   ▸ tag1             │                      │                     │
+│   ▾ tag2             │                      │                     │
+│     feed2            │                      │                     │
+│ ▾ Feeds              │                      │                     │
+│   feed3              │                      │                     │
+│ Saved (1)            │                      │                     │
 └──────────────────────┴──────────────────────┴─────────────────────┘
 ```
 
-Nav pane structure, top to bottom:
-- `All Unread` — virtual node, all items unread-first.
-- `Read Later` — virtual node, items flagged `read_later`.
-- `Favourite` — virtual node, items flagged `favorite`.
-- `Categories` — tree: categories → subcategories → feeds, **nested to any depth**. Unread count per feed in parens. Uncategorized feeds at root.
-- `Tags` — flat list of feed tags (`#tag`).
-- `Saved` — virtual node, items flagged `saved` (kept in DB, no markdown).
-- Article pane split: header (meta + summary) + content (full content only). Body never repeats the summary.
+Nav pane = **preset-driven** (see Config → Nav Pane Presets). Each preset is an ordered array of sections; the default full preset is `[Unread, Read Later, Favourite, Categories, Tags, Saved]` (plus `Feeds`, `No Category` are available sections).
+
+Top entries and their fold behavior:
+
+| Entry | Foldable | Children |
+|---|---|---|
+| Unread | no | — (list of unread items) |
+| Read Later | no | — (items flagged read_later) |
+| Saved | no | — (items flagged saved) |
+| Favourite | yes | favourited feeds (flat) |
+| Categories | yes | category tree → feeds |
+| Tags | yes | per-tag entries, each foldable → feeds carrying it |
+| Feeds | yes | all feeds (flat) |
+| No Category | yes | feeds without a category (flat) |
+
+Tree behavior:
+- **All top entries highlighted** (distinct fg + bold).
+- Indentation: categories 2 spaces, feeds 4 spaces under a category/tag, 2 spaces under Feeds/Favourite/No Category.
+- **Left (`h`/`q`/`esc`) cascade**: expanded header → fold it; folded header → fold its parent; a top-level folded entry stays (never jumps to Unread); a feed row folds its containing container (category → tag → section).
+- **Right (`l`/`enter`)**: folded entry → expand and **jump the cursor to its first child**; expanded/leaf entry → descend to the list pane.
+- Article pane split: header (meta + summary) + content. **List mode (focus in list) shows summary only**; article mode shows the RSS body (blank when the feed has none).
 - Pane widths configurable via `pane_ratio` (default ≈ 0.15 / 0.15 / 0.70).
 
 ### Feed Source
@@ -52,40 +70,36 @@ Feed list from one source, read live:
 
 ### Navigation
 
-Left/right movement via `h`/`l`, `q`/`enter`/`esc`, and arrow keys (`←`/`→`).
+Directional movement: `h`/`q`/`esc` = LEFT, `l`/`enter` = RIGHT (+ arrow keys `←`/`→`).
 
-- Nav pane = virtual nodes (All Unread / Read Later / Favourite / Saved) + Categories tree + Tags list.
 - **Right** (`l` / `enter` / `→`):
-  - virtual node (All Unread / Read Later / Favourite / Saved) → list pane (its items)
-  - folded category → expand it
-  - expanded category with children → descend into subcategory on `j/k`; right → list pane (all items in category incl. subcats)
-  - feed → list pane (all items in that feed)
-  - tag → list pane (items from feeds carrying it)
+  - folded entry (section / category / tag / Favourite / No Category) → expand + cursor to first child
+  - expanded node / feed / tag / virtual node → list pane
   - item in list → article pane + mark read
-  - article pane → fetch full content
-- **Left** (`h` / `q` / `esc` / `←`): go back one level — article → list → nav; in nav, feed → fold its category, expanded category → fold.
+  - article pane → **always fetch full content** (even when the feed provided a body)
+- **Left** (`h` / `q` / `esc` / `←`): article → list → nav; in nav: expanded header → fold, folded → fold parent, top folded → stay; feed row → fold its container
 - `j/k` move cursor in nav (live-preview list, no read change).
-- List `j/k` moves selection — **does not mark read**. `Enter`/`→` opens the article (marks read, focuses article pane).
-- Article pane shows summary in the header; body shows full content if already fetched, else a fetch hint.
-- **Auto-fetch is off**: full content is fetched only when the user presses `Enter`/`→` again in the article pane.
-- Displaying content marks the item read (auto on open and on `n/p` navigation). `u` toggles read manually; `A` marks all in view read.
-- `n/p` next/prev item; `j/k` scroll; ctrl+u/ctrl+d half-page scroll.
+- List `j/k` moves selection — **does not mark read**. `l`/`enter` opens the article (marks read, clears read-later).
+- List `n`/`p` — mark current read, jump to next/prev unread (no reorder).
+- **List semantics**: the list is a snapshot taken at startup / manual refresh (`R`) / scope change. Auto fetch (`r`/startup/interval) only **appends new unread items** — read items stay in place, never reordered, until manual refresh or restart.
+- **Read-later lifecycle**: marking read-later also marks the item unread; opening/reading an item clears its read-later flag.
+- Article pane: list mode shows summary only; article mode shows the RSS body (blank if none); `n/p` next/prev item; `j/k` scroll; ctrl+u/ctrl+d half-page.
 
 ### Storage
 
 - SQLite database at `$XDG_CACHE_HOME/markerss/markerss.db` — items + content + flags.
-- Items keyed `(feed_url, guid)`; flags and fetched content preserved across refresh.
-- Per-item boolean flags: `read`, `read_later`, `favorite`, `saved` — independent, orthogonal.
-- Fetched article content (readability-extracted) stored per item; refresh keeps existing fetched content.
+- Items keyed `(feed_url, guid)`; flags and content preserved across refresh.
+- Per-item boolean flags: `read`, `read_later`, `saved` — independent. **Favourite is feed-level** (stored in the urls file as `!favourite` marker, not in the DB).
+- **Feed-provided content is kept on refresh** (arrives with the feed — no extra request); full-article fetch (readability) may replace it.
 - Markdown generated ONLY at export time, never stored.
-- Configurable TTL: startup purge of fetched content older than `cache_ttl_days` — **`saved` items exempt** (content kept, item never deleted).
+- Configurable TTL: startup purge of fetched content older than `cache_ttl_days` — **`saved` items exempt**.
 - Subscriptions stay in the `urls` file (newsboat format) — DB holds items only.
 
 ### Full-Content Fetch
 
-- On explicit `Enter`/`→` in the article pane: fetch the article page, extract the main content (readability-style), store in DB.
+- On `l`/`enter` in the article pane: fetch the article page, extract the main content (readability-style), store in DB.
+- **Always attempted** — even when the feed provided a body (may replace it).
 - Extraction removes nav/sidebar/ads; falls back to raw page if extraction fails.
-- Already-fetched content is reused (no refetch).
 
 ### Rendering
 
@@ -95,22 +109,25 @@ Left/right movement via `h`/`l`, `q`/`enter`/`esc`, and arrow keys (`←`/`→`)
   - Links as **underlined alt text (URL not shown)**.
   - Images shown as `[img]` placeholder.
   - `<sub>`/`<sup>` → `~x~`/`^x^` markers (rendered as subscript/superscript).
+- Article pane modes: **list mode** → body hidden (summary only); **article mode** → RSS body rendered (blank when the feed has none); fetched full content replaces it.
 - Export format = the same markdown, written to file on `e`.
 - Help = floating opaque window (default colors), scrollable with `j`/`k`/arrows.
 
 ### Export
 
-- `e` → markdown file: YAML frontmatter (title, link, date, feed) + full content.
-- Default dir: `$XDG_DATA_HOME/markerss/<category>/<slug>.md` (uncategorized → root). Configurable via `export_dir`.
+- `e` → prompt with the **default path prefilled** as placeholder (`$XDG_DATA_HOME/markerss/<category>/<slug>.md`, uncategorized → root); enter accepts, or type a custom path.
+- Markdown: YAML frontmatter (title, link, date, feed) + full content.
 
 ### Refresh
 
-- Auto on startup (background, non-blocking) + `r` manual refresh.
+- **Partial** (`r`): fetch new items for the **current scope's feeds only** (upsert — never removes read items; new unread appended to the list top).
+- **Full** (`R`): fetch every feed, rebuild the list snapshot, re-apply read state (unread only in All Unread).
+- Auto fetch on startup (background, non-blocking) + optional interval — both behave like partial refresh.
 
 ### Paths (XDG)
 
 - Config: `$XDG_CONFIG_HOME/markerss/` — two separate files:
-  - `config` (app settings: cache TTL, export dir, pane ratio, browser, refresh)
+  - `config.toml` (app settings: cache TTL, export dir, pane ratio, browser, refresh, nav_presets) — TOML assumed; other formats by extension only
   - `urls` (newsboat-format subscriptions — kept separate from app config)
 - Cache/DB: `$XDG_CACHE_HOME/markerss/markerss.db` (SQLite)
 - Export: data dir (configurable)
@@ -120,40 +137,32 @@ Left/right movement via `h`/`l`, `q`/`enter`/`esc`, and arrow keys (`←`/`→`)
 
 | Key | Scope | Action |
 |---|---|---|
-| h / q / esc / ← | global | go LEFT: article→list→nav; in nav: feed→fold category, expanded category→fold |
-| l / enter / → | global | go RIGHT: virtual node/category/feed/tag→list; item→article+read; article→fetch full |
+| h / q / esc / ← | global | go LEFT: article→list→nav; in nav: fold, then fold parent (top folded stays) |
+| l / enter / → | global | go RIGHT: expand (cursor → first child) → list → article+read → fetch full |
 | j/k | nav | move (live-preview list) |
 | j/k | list | move selection (no read change) |
 | j/k | article | scroll |
-| n/p | article | next/prev item (marks read) |
-| o | list+article | open in browser |
-| e | list+article | export markdown |
-| u | list+article | toggle read/unread |
+| n/p | list | mark current read + jump to next/prev unread (no reorder) |
+| n/p | article | next/prev item (marks read, clears read-later) |
+| a | list+article | toggle read/unread |
 | A | list | mark all unread in view read |
 | <c-u>/<c-d> | article | scroll half page |
-| <space> | list | toggle read + move to next item |
-| a | nav | add feed (URL → title → category → tags prompts) |
+| o | list+article | open in browser |
+| e | list+article | export markdown (rename prompt, default prefilled) |
+| N | nav | add feed (URL → title → category → tags prompts) |
 | d | nav | delete feed (press twice to confirm) |
-| R | nav | rename category |
-| F | global | toggle full-screen focus on article pane |
+| M | nav | rename — feed custom title / category / tag (contextual) |
+| T | nav | edit feed tags (prefilled) |
+| F | nav / article | nav: favourite feed · article: toggle fullscreen |
+| L / S | list+article | toggle read-later / saved (again to cancel; L marks unread) |
+| t | nav | cycle nav preset |
+| r / R | global | partial refresh (current scope) / full refresh (rebuild) |
+| i / x | global | import / export OPML |
 | Q | global | quit app |
 | Tab / Shift+Tab | global | focus next / prev pane |
-| r | global | refresh |
 | ? | global | help (floating scrollable window) |
-| f | article | link jump — highlight links, 1-9/letter hints, press key to open in browser |
-| gi | article | toggle kitty image render |
-| t | nav | toggle nav pane layout (Full ↔ Simple; disabled when `nav_pane` set) |
-| gg / G | nav+list | jump top / bottom |
-| Ctrl+f / Ctrl+b | list+article | full page down / up |
-| zt / zz / zb | article | scroll cursor top / center / bottom |
-| { / } | article | jump prev / next paragraph |
-| [ / ] | article | jump prev / next section (h2/h3) |
-| / | list | modal search — n = next match, esc exits |
-| zr / zm / zR / zM | nav | fold level ±1 / open all / close all |
-| yy / yn | list+article | copy item URL / title |
-| yf | list+nav | copy feed URL |
-| st / sn / sf / su | list | push sort level: time / title / feed / unread-first (last pressed = highest; keep last 3) |
-| S | list | reverse sort order |
+
+Advanced keys (planned, unbound or remapped — see Advanced): `gg/G`, `Ctrl+f/b`, `zt/zz/zb`, `{/}`, `[/]`, `/` search, `yy/yn/yf`, `st/sn/sf/su`, `s` reverse, `gi` images.
 
 ### Decisions
 
@@ -162,8 +171,8 @@ Left/right movement via `h`/`l`, `q`/`enter`/`esc`, and arrow keys (`←`/`→`)
 | Branch strategy | main = design docs only; parallel impl branches rebase on main | Single design source, parallel impl | 2026-08 |
 | Persistence | SQLite (items + content + read flags) | Single-file, queryable, preserves state across refresh | 2026-08 |
 | Layout | 3 panes: nav tree / item list / article | Mirrors mail-client pattern | 2026-08 |
-| Tree | Virtual nodes (Unread/Read Later/Favourite/Saved) + Categories tree (nested) + Tags list | single nav pane, mail-client pattern | 2026-08 |
-| Keys | Vim keys + arrows both bound; h/l/q/enter/esc/←/→ for left/right | Familiarity; explicit nav semantics | 2026-08 |
+| Tree | Preset-driven sections: Unread/Read Later/Favourite/Categories/Tags/Saved/Feeds/No Category; foldable except Unread/Read Later/Saved | single nav pane, mail-client pattern | 2026-08 |
+| Keys | h/q/esc left, l/enter right; a/A/N/M/F/L/S/t/r/R/i/x/Q | Explicit directional nav + per-action keys | 2026-08 |
 | Feed source | newsboat `urls` format, read live | Zero migration; coexists with newsboat; single source of truth | 2026-08 |
 | Category vs tags | one category (tree placement) + multi `#tags` (optional) | category = structure, tags = cross-cutting | 2026-08 |
 | Article flow | List enter = open + read; article enter = fetch full only (no auto-fetch) | Fetch only on explicit action; summary-only until opened | 2026-08 |
@@ -198,7 +207,9 @@ Left/right movement via `h`/`l`, `q`/`enter`/`esc`, and arrow keys (`←`/`→`)
 
 - Each preset = array of nav sections; one default full preset: `[Unread, Read Later, Favourite, Categories, Tags, Saved]`.
 - `nav_presets` replaces the list; first entry is the initial preset; `t` cycles through all presets (wrap).
-- Valid sections: `Unread` (All Unread), `Read Later`, `Favourite`, `Saved`, `Categories` (tree), `Tags`, `Feeds`.
+- Valid sections: `Unread`, `Read Later`, `Favourite`, `Saved`, `Categories` (tree), `Tags`, `Feeds`.
+- `No Category` renders automatically at the end of the Categories section.
+- Section rendering: single-node sections (Unread / Read Later / Saved / Favourite) render as the node itself; list sections (Categories / Tags / Feeds) render a foldable header row + children.
 
 ### Decisions
 
@@ -217,7 +228,8 @@ Left/right movement via `h`/`l`, `q`/`enter`/`esc`, and arrow keys (`←`/`→`)
 ### Virtual nodes
 
 - **Favourite = feed-level**: `f` on a nav feed row toggles the feed's favourite; marker persisted in the urls file; Favourite node lists favourited feeds (category-tree presentation).
-- **Read Later / Saved = item-level**: `L` / `S` in the article view toggle; nodes aggregate flagged items across feeds (All Unread pattern); independent, item can carry both.
+- **Read Later / Saved = item-level**: `L` / `S` in the list or article view toggle (again to cancel); nodes aggregate flagged items across feeds (All Unread pattern); independent, item can carry both.
+- **Read-later lifecycle**: `L` also marks the item unread; opening/reading an item clears its read-later flag.
 - `saved` = items kept in DB without markdown; exempt from TTL cleanup.
 
 ### Tags
