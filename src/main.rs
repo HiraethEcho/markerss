@@ -375,13 +375,13 @@ impl App {
             return;
         };
         self.db.set_read(&url, &item.guid, true).ok();
-        // reading clears read-later
+        // reading clears read-later; do NOT rebuild the list — the item stays
+        // visible in the current view until it's left or refreshed
         if item.read_later {
             self.db.set_flag(&url, &item.guid, "read_later", false).ok();
         }
         self.focus = 2;
         self.article_scroll = 0;
-        self.rebuild_list();
         // summary-only until opened — fetch full content only on explicit
         // <enter> in the article pane
         if item.content.trim().is_empty() {
@@ -782,7 +782,7 @@ impl App {
                 if item.read_later {
                     self.db.set_flag(&url, &item.guid, "read_later", false).ok();
                 }
-                self.rebuild_list();
+                // no rebuild — keeps the current view stable
             }
         }
     }
