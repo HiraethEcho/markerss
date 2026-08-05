@@ -114,7 +114,7 @@ enum TreeRow {
     Favourite,
     FavouriteFeed(String, String), // url, display name
     Category(String),
-    Feed(String, String), // url, display name
+    Feed(String, String, u8), // url, display name, indent
     Tag(String),
 }
 
@@ -225,6 +225,7 @@ impl App {
                                 rows.push(TreeRow::Feed(
                                     f.url.clone(),
                                     f.display_name().to_string(),
+                                    4,
                                 ));
                             }
                         }
@@ -232,12 +233,21 @@ impl App {
                 }
                 "Tags" => {
                     for t in self.feeds.all_feed_tags() {
-                        rows.push(TreeRow::Tag(t));
+                        rows.push(TreeRow::Tag(t.clone()));
+                        if !self.collapsed.contains(&format!("tag:{t}")) {
+                            for f in self.feeds.feeds.iter().filter(|f| f.has_tag(&t)) {
+                                rows.push(TreeRow::Feed(
+                                    f.url.clone(),
+                                    f.display_name().to_string(),
+                                    4,
+                                ));
+                            }
+                        }
                     }
                 }
                 "Feeds" => {
                     for f in self.feeds.feeds.iter() {
-                        rows.push(TreeRow::Feed(f.url.clone(), f.display_name().to_string()));
+                        rows.push(TreeRow::Feed(f.url.clone(), f.display_name().to_string(), 2));
                     }
                 }
                 _ => {}
@@ -266,7 +276,7 @@ impl App {
             TreeRow::ReadLater => Scope::ReadLater,
             TreeRow::Saved => Scope::Saved,
             TreeRow::Category(c) => Scope::Category(c.clone()),
-            TreeRow::Feed(url, _) => Scope::Feed(url.clone()),
+            TreeRow::Feed(url, _, _) => Scope::Feed(url.clone()),
             TreeRow::FavouriteFeed(url, _) => Scope::Feed(url.clone()),
             TreeRow::Tag(t) => Scope::Tag(t.clone()),
             TreeRow::Favourite => Scope::AllUnread,
@@ -288,7 +298,7 @@ impl App {
                 TreeRow::ReadLater => Scope::ReadLater,
                 TreeRow::Saved => Scope::Saved,
                 TreeRow::Category(c) => Scope::Category(c),
-                TreeRow::Feed(url, _) => Scope::Feed(url),
+                TreeRow::Feed(url, _, _) => Scope::Feed(url),
                 TreeRow::FavouriteFeed(url, _) => Scope::Feed(url),
                 TreeRow::Tag(t) => Scope::Tag(t),
                 TreeRow::Favourite => Scope::AllUnread,
@@ -568,7 +578,7 @@ impl App {
     }
 
     fn delete_selected_feed(&mut self) {
-        if let Some(TreeRow::Feed(url, name)) = self.tree_rows.get(self.tree_sel).cloned() {
+        if let Some(TreeRow::Feed(url, name, _)) = self.tree_rows.get(self.tree_sel).cloned() {
             self.feeds.remove(&url);
             self.save_urls();
             self.rebuild_tree();
@@ -846,7 +856,7 @@ impl App {
                         .tree_rows
                         .get(self.tree_sel)
                         .map(|r| match r {
-                            TreeRow::Feed(_, n) => n.clone(),
+                            TreeRow::Feed(_, n, _) => n.clone(),
                             _ => String::new(),
                         })
                         .unwrap_or_default();
@@ -856,7 +866,7 @@ impl App {
             KeyCode::Char('R') if self.focus == 0 => self.start_input(InputMode::RenameCategory),
             // T: edit tags of the selected feed (nav)
             KeyCode::Char('T') if self.focus == 0 => {
-                if let Some(TreeRow::Feed(url, _)) = self.tree_rows.get(self.tree_sel).cloned() {
+                if let Some(TreeRow::Feed(url, _, _)) = self.tree_rows.get(self.tree_sel).cloned() {
                     self.edit_tags_url = Some(url);
                     self.start_input(InputMode::EditTags);
                 }
@@ -874,7 +884,7 @@ impl App {
 
     /// Toggle favourite on the selected feed row (persists to urls file).
     fn toggle_favourite_feed(&mut self) {
-        let Some(TreeRow::Feed(url, _)) = self.tree_rows.get(self.tree_sel).cloned() else {
+        let Some(TreeRow::Feed(url, _, _)) = self.tree_rows.get(self.tree_sel).cloned() else {
             return;
         };
         let new_state = {
@@ -919,11 +929,12 @@ impl App {
         }
     }
 
-    /// Nav left: feed → fold its parent category / favourite section;
-    /// expanded category → collapse; else → first row (root).
+    /// Nav left: feed → fold its parent (category/tag/favourite); expanded
+    /// node → fold; collapsed node → stay (never jump to Unread).
     fn nav_left(&mut self) {
         match self.tree_rows.get(self.tree_sel).cloned() {
-            Some(TreeRow::Feed(url, _)) => {
+            Some(TreeRow::Feed(url, _, indent)) => {
+                // parent = category (indent 4 in Categories/Tags), else fold
                 let cat = self
                     .feeds
                     .feeds
@@ -932,18 +943,38 @@ impl App {
                     .and_then(|f| f.category())
                     .map(str::to_string);
                 if let Some(c) = cat {
-                    self.collapsed.insert(c.clone());
+                    if indent == 4 {
+                        // under a category or tag: fold the category
+                        self.collapsed.insert(c.clone());
+                        self.rebuild_tree();
+                        if let Some(idx) = self
+                            .tree_rows
+                            .iter()
+                            .position(|r| matches!(r, TreeRow::Category(x) if *x == c))
+                        {
+                            self.tree_sel = idx;
+                        }
+                        return;
+                    }
+                }
+                // under a tag or flat: fold the owning tag if any
+                let tag = self.feeds.all_feed_tags().into_iter().find(|t| {
+                    let f = self.feeds.feeds.iter().find(|x| x.url == url);
+                    matches!(f, Some(x) if x.has_tag(t))
+                });
+                if let Some(t) = tag {
+                    self.collapsed.insert(format!("tag:{t}"));
                     self.rebuild_tree();
                     if let Some(idx) = self
                         .tree_rows
                         .iter()
-                        .position(|r| matches!(r, TreeRow::Category(x) if *x == c))
+                        .position(|r| matches!(r, TreeRow::Tag(x) if *x == t))
                     {
                         self.tree_sel = idx;
                     }
-                } else {
-                    self.tree_sel = 0;
+                    return;
                 }
+                self.tree_sel = 0;
             }
             Some(TreeRow::FavouriteFeed(_, _)) => {
                 self.fav_expanded = false;
@@ -952,14 +983,25 @@ impl App {
                     self.tree_sel = idx;
                 }
             }
-            Some(TreeRow::Section(name)) if !self.collapsed.contains(&name) => {
-                self.collapsed.insert(name);
-                self.rebuild_tree();
+            Some(TreeRow::Section(name)) => {
+                if self.collapsed.contains(&name) {
+                    // top parent — stay
+                } else {
+                    self.collapsed.insert(name);
+                    self.rebuild_tree();
+                }
+            }
+            Some(TreeRow::Tag(t)) => {
+                let key = format!("tag:{t}");
+                if self.collapsed.contains(&key) {
+                    // already folded — stay
+                } else {
+                    self.collapsed.insert(key);
+                    self.rebuild_tree();
+                }
             }
             Some(TreeRow::Category(cat)) => {
-                if self.collapsed.contains(&cat) {
-                    self.tree_sel = 0;
-                } else {
+                if !self.collapsed.contains(&cat) {
                     self.collapsed.insert(cat);
                     self.rebuild_tree();
                 }
@@ -982,6 +1024,10 @@ impl App {
             }
             Some(TreeRow::Favourite) if !self.fav_expanded => {
                 self.fav_expanded = true;
+                self.rebuild_tree();
+            }
+            Some(TreeRow::Tag(t)) if self.collapsed.contains(&format!("tag:{t}")) => {
+                self.collapsed.remove(&format!("tag:{t}"));
                 self.rebuild_tree();
             }
             Some(row) => self.select_scope(&row),
@@ -1159,11 +1205,11 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                     .map(|f| app.db.unread_count(&f.url).unwrap_or(0))
                     .sum();
                 let prefix = if app.collapsed.contains(cat) { "▸" } else { "▾" };
-                (format!("{prefix} {cat} ({n})"), Style::default())
+                (format!("  {prefix} {cat} ({n})"), Style::default())
             }
-            TreeRow::Feed(url, name) => {
+            TreeRow::Feed(url, name, indent) => {
                 let n = app.db.unread_count(url).unwrap_or(0);
-                (format!("  {name} ({n})"), Style::default())
+                (format!("{}{} ({n})", " ".repeat(*indent as usize), name), Style::default())
             }
             TreeRow::Tag(t) => {
                 let n = app
@@ -1172,7 +1218,12 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                     .iter()
                     .filter(|f| f.has_tag(t))
                     .count();
-                (format!("# {t} ({n})"), Style::default())
+                let prefix = if app.collapsed.contains(&format!("tag:{t}")) {
+                    "▸"
+                } else {
+                    "▾"
+                };
+                (format!("  {prefix} {t} ({n})"), Style::default())
             }
         };
         let item = ListItem::new(text);
@@ -1202,7 +1253,16 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &App) {
     for (i, (url, item)) in app.scoped_items.iter().enumerate() {
         let read = app.db.is_read(url, &item.guid).unwrap_or(false);
         let marker = if read { " " } else { "•" };
-        let text = format!("{marker} {}", item.display_title());
+        let flags = if item.saved && item.read_later {
+            " [SL]"
+        } else if item.saved {
+            " [S]"
+        } else if item.read_later {
+            " [L]"
+        } else {
+            ""
+        };
+        let text = format!("{marker} {}{flags}", item.display_title());
         let mut li = ListItem::new(text);
         if i == app.list_sel {
             let style = if app.focus == 1 {
@@ -1274,11 +1334,20 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         "unread"
     };
+    let flags_mark = if item.saved && item.read_later {
+        " [SL]"
+    } else if item.saved {
+        " [S]"
+    } else if item.read_later {
+        " [L]"
+    } else {
+        ""
+    };
 
     let header_text = Text::from(vec![
         Line::from(Span::styled(item.display_title(), title_style)),
         Line::from(Span::styled(
-            format!("{feed_name}  ·  {}  ·  {read_mark}", fmt_date(&item.date)),
+            format!("{feed_name}  ·  {}  ·  {read_mark}{flags_mark}", fmt_date(&item.date)),
             meta_style,
         )),
         Line::from(Span::styled(item.url.clone(), dim_style)),
