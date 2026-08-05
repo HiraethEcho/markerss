@@ -18,7 +18,12 @@ pub struct Feed {
     pub title: Option<String>,
     /// Title came with `~` prefix → custom display name, do not override from feed.
     pub custom_name: bool,
+    /// Categories (`#`-less words); first = tree placement.
     pub tags: Vec<String>,
+    /// Feed tags (`#`-prefixed words).
+    pub feed_tags: Vec<String>,
+    /// Favourite flag (`!favourite` marker).
+    pub favourite: bool,
 }
 
 impl Feed {
@@ -45,7 +50,19 @@ impl Feed {
             line.push(' ');
             line.push_str(tag);
         }
+        for tag in &self.feed_tags {
+            line.push(' ');
+            line.push('#');
+            line.push_str(tag);
+        }
+        if self.favourite {
+            line.push_str(" !favourite");
+        }
         line
+    }
+
+    pub fn has_tag(&self, tag: &str) -> bool {
+        self.feed_tags.iter().any(|t| t == tag)
     }
 }
 
@@ -113,6 +130,19 @@ impl File {
     pub fn uncategorized(&self) -> Vec<&Feed> {
         self.feeds.iter().filter(|f| f.category().is_none()).collect()
     }
+
+    /// All distinct feed tags, in tree order.
+    pub fn all_feed_tags(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for f in &self.feeds {
+            for t in &f.feed_tags {
+                if !out.contains(t) {
+                    out.push(t.clone());
+                }
+            }
+        }
+        out
+    }
 }
 
 pub fn parse(input: &str) -> Vec<Feed> {
@@ -142,12 +172,28 @@ pub fn parse_line(line: &str) -> Option<Feed> {
         rest = r[end + 1..].trim();
     }
 
-    let tags = rest.split_whitespace().map(str::to_string).collect();
+    let words: Vec<String> = rest.split_whitespace().map(str::to_string).collect();
+    let mut categories = Vec::new();
+    let mut feed_tags = Vec::new();
+    let mut favourite = false;
+    for w in words {
+        if let Some(t) = w.strip_prefix('#') {
+            if !t.is_empty() {
+                feed_tags.push(t.to_string());
+            }
+        } else if w == "!favourite" {
+            favourite = true;
+        } else {
+            categories.push(w);
+        }
+    }
     Some(Feed {
         url: url.to_string(),
         title,
         custom_name,
-        tags,
+        tags: categories,
+        feed_tags,
+        favourite,
     })
 }
 
@@ -197,11 +243,27 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_line() {
-        let f = parse_line(r#"https://x.com/feed.xml "~My Name" tech rust"#).unwrap();
-        assert_eq!(f.to_line(), r#"https://x.com/feed.xml "~My Name" tech rust"#);
-        let f2 = parse_line(r#"https://x.com/plain.xml"#).unwrap();
-        assert_eq!(f2.to_line(), "https://x.com/plain.xml");
+    fn feed_tags_and_favourite() {
+        let f = parse_line(r#"https://x.com/feed.xml "T" blog #tech #rust !favourite"#).unwrap();
+        assert_eq!(f.tags, vec!["blog"]);
+        assert_eq!(f.feed_tags, vec!["tech", "rust"]);
+        assert!(f.favourite);
+        assert!(f.has_tag("tech"));
+        assert!(!f.has_tag("blog"));
+    }
+
+    #[test]
+    fn roundtrip_tags_favourite() {
+        let f = parse_line(r#"https://x.com/f "~N" cat #t1 !favourite"#).unwrap();
+        assert_eq!(f.to_line(), r#"https://x.com/f "~N" cat #t1 !favourite"#);
+    }
+
+    #[test]
+    fn no_tags_ok() {
+        let f = parse_line("https://x.com/plain.xml").unwrap();
+        assert!(f.feed_tags.is_empty());
+        assert!(!f.favourite);
+        assert!(f.tags.is_empty());
     }
 
     #[test]

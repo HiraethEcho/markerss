@@ -7,20 +7,23 @@ use std::time::Duration;
 
 use crate::model::Item;
 
-const TIMEOUT: Duration = Duration::from_secs(30);
 const USER_AGENT: &str = concat!("markerss/", env!("CARGO_PKG_VERSION"));
 
-pub fn http() -> reqwest::blocking::Client {
-    reqwest::blocking::Client::builder()
-        .timeout(TIMEOUT)
-        .user_agent(USER_AGENT)
-        .build()
-        .expect("http client")
+pub fn http(timeout_secs: u64) -> reqwest::blocking::Client {
+    let mut b = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(timeout_secs.max(1)))
+        .user_agent(USER_AGENT);
+    if let Ok(proxy) = std::env::var("MARKERSS_PROXY") {
+        if let Ok(p) = reqwest::Proxy::all(&proxy) {
+            b = b.proxy(p);
+        }
+    }
+    b.build().expect("http client")
 }
 
 /// Refresh one feed; returns items sorted newest-first.
-pub fn refresh_feed(url: &str) -> Result<Vec<Item>, String> {
-    let resp = http()
+pub fn refresh_feed(url: &str, timeout_secs: u64) -> Result<Vec<Item>, String> {
+    let resp = http(timeout_secs)
         .get(url)
         .send()
         .map_err(|e| format!("GET {url}: {e}"))?;
@@ -61,6 +64,8 @@ pub fn refresh_feed(url: &str) -> Result<Vec<Item>, String> {
                 summary,
                 content,
                 date,
+                read_later: false,
+                saved: false,
             }
         })
         .collect();
@@ -71,13 +76,13 @@ pub fn refresh_feed(url: &str) -> Result<Vec<Item>, String> {
 
 /// Fetch full article, extract main content (Mozilla Readability via
 /// dom_smoothie). Returns article HTML; falls back to the whole page.
-pub fn fetch_article(url: &str) -> Result<String, String> {
-    let html = fetch_html(url)?;
+pub fn fetch_article(url: &str, timeout_secs: u64) -> Result<String, String> {
+    let html = fetch_html(url, timeout_secs)?;
     Ok(extract_main(url, &html))
 }
 
-fn fetch_html(url: &str) -> Result<String, String> {
-    let resp = http()
+fn fetch_html(url: &str, timeout_secs: u64) -> Result<String, String> {
+    let resp = http(timeout_secs)
         .get(url)
         .send()
         .map_err(|e| format!("GET {url}: {e}"))?;

@@ -118,6 +118,8 @@ fn make_feed(url: String, title: Option<String>, tags: &[String]) -> Feed {
         title,
         custom_name,
         tags: tags.to_vec(),
+        feed_tags: Vec::new(),
+        favourite: false,
     }
 }
 
@@ -137,8 +139,8 @@ mod tests {
 
     fn sample_file() -> File {
         let mut f = File::default();
-        f.upsert(Feed { url: "https://a.com/f".into(), title: Some("A".into()), custom_name: false, tags: vec!["tech".into()] });
-        f.upsert(Feed { url: "https://b.com/f".into(), title: None, custom_name: false, tags: vec![] });
+        f.upsert(Feed { url: "https://a.com/f".into(), title: Some("A".into()), custom_name: false, tags: vec!["tech".into()], feed_tags: vec![], favourite: false });
+        f.upsert(Feed { url: "https://b.com/f".into(), title: None, custom_name: false, tags: vec![], feed_tags: vec![], favourite: false });
         f
     }
 

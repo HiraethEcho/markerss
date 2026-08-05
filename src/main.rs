@@ -34,6 +34,7 @@ use crate::feedlist::{Feed, File};
 enum Msg {
     FeedRefreshed { url: String, result: Result<Vec<Item>, String> },
     ArticleFetched { url: String, guid: String, result: Result<String, String> },
+    RefreshTick,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -56,8 +57,11 @@ struct InputPrompt {
 #[derive(Debug, Clone, PartialEq)]
 enum Scope {
     AllUnread,
+    ReadLater,
+    Saved,
     Category(String),
     Feed(String),
+    Tag(String),
 }
 
 struct App {
@@ -67,6 +71,8 @@ struct App {
 
     // nav tree
     collapsed: std::collections::HashSet<String>,
+    preset_idx: usize,
+    fav_expanded: bool,
     tree_sel: usize,
     tree_rows: Vec<TreeRow>,
 
@@ -98,8 +104,13 @@ struct App {
 #[derive(Debug, Clone)]
 enum TreeRow {
     AllUnread,
+    ReadLater,
+    Saved,
+    Favourite,
+    FavouriteFeed(String, String), // url, display name
     Category(String),
     Feed(String, String), // url, display name
+    Tag(String),
 }
 
 impl App {
@@ -112,6 +123,8 @@ impl App {
             feeds,
             db,
             collapsed: Default::default(),
+            preset_idx: 0,
+            fav_expanded: true,
             tree_sel: 0,
             tree_rows: Vec::new(),
             scope: Scope::AllUnread,
@@ -135,24 +148,80 @@ impl App {
             tx,
         };
         app.rebuild_tree();
+        app.apply_default_view();
         app.rebuild_list();
         app
+    }
+
+    fn apply_default_view(&mut self) {
+        let Some(dv) = &self.cfg.default_view else { return };
+        if let Some(url) = dv.strip_prefix("Feed:") {
+            if self.feeds.feeds.iter().any(|f| f.url == url) {
+                self.scope = Scope::Feed(url.to_string());
+            }
+        } else if let Some(cat) = dv.strip_prefix("Category:") {
+            if self.feeds.categories().iter().any(|c| c == cat) {
+                self.scope = Scope::Category(cat.to_string());
+            }
+        }
     }
 
     // ── tree ──────────────────────────────────────────────────────────────
 
     fn rebuild_tree(&mut self) {
-        let mut rows = vec![TreeRow::AllUnread];
-        for cat in self.feeds.categories() {
-            rows.push(TreeRow::Category(cat.clone()));
-            if !self.collapsed.contains(&cat) {
-                for f in self.feeds.by_category(&cat) {
-                    rows.push(TreeRow::Feed(f.url.clone(), f.display_name().to_string()));
+        let preset = self
+            .cfg
+            .nav_presets
+            .get(self.preset_idx)
+            .cloned()
+            .unwrap_or_else(|| {
+                crate::config::DEFAULT_NAV_PRESET
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            });
+        let mut rows: Vec<TreeRow> = Vec::new();
+        for section in preset {
+            match section.as_str() {
+                "Unread" => rows.push(TreeRow::AllUnread),
+                "Read Later" => rows.push(TreeRow::ReadLater),
+                "Saved" => rows.push(TreeRow::Saved),
+                "Favourite" => {
+                    rows.push(TreeRow::Favourite);
+                    if self.fav_expanded {
+                        for f in self.feeds.feeds.iter().filter(|f| f.favourite) {
+                            rows.push(TreeRow::FavouriteFeed(
+                                f.url.clone(),
+                                f.display_name().to_string(),
+                            ));
+                        }
+                    }
                 }
+                "Categories" => {
+                    for cat in self.feeds.categories() {
+                        rows.push(TreeRow::Category(cat.clone()));
+                        if !self.collapsed.contains(&cat) {
+                            for f in self.feeds.by_category(&cat) {
+                                rows.push(TreeRow::Feed(
+                                    f.url.clone(),
+                                    f.display_name().to_string(),
+                                ));
+                            }
+                        }
+                    }
+                }
+                "Tags" => {
+                    for t in self.feeds.all_feed_tags() {
+                        rows.push(TreeRow::Tag(t));
+                    }
+                }
+                "Feeds" => {
+                    for f in self.feeds.feeds.iter() {
+                        rows.push(TreeRow::Feed(f.url.clone(), f.display_name().to_string()));
+                    }
+                }
+                _ => {}
             }
-        }
-        for f in self.feeds.uncategorized() {
-            rows.push(TreeRow::Feed(f.url.clone(), f.display_name().to_string()));
         }
         self.tree_rows = rows;
         if self.tree_sel >= self.tree_rows.len() {
@@ -160,11 +229,23 @@ impl App {
         }
     }
 
+    fn cycle_preset(&mut self) {
+        if self.cfg.nav_presets.len() > 1 {
+            self.preset_idx = (self.preset_idx + 1) % self.cfg.nav_presets.len();
+            self.rebuild_tree();
+        }
+    }
+
     fn select_scope(&mut self, row: &TreeRow) {
         self.scope = match row {
             TreeRow::AllUnread => Scope::AllUnread,
+            TreeRow::ReadLater => Scope::ReadLater,
+            TreeRow::Saved => Scope::Saved,
             TreeRow::Category(c) => Scope::Category(c.clone()),
             TreeRow::Feed(url, _) => Scope::Feed(url.clone()),
+            TreeRow::FavouriteFeed(url, _) => Scope::Feed(url.clone()),
+            TreeRow::Tag(t) => Scope::Tag(t.clone()),
+            TreeRow::Favourite => Scope::AllUnread,
         };
         self.list_sel = 0;
         self.rebuild_list();
@@ -176,8 +257,13 @@ impl App {
         if let Some(row) = self.tree_rows.get(self.tree_sel).cloned() {
             self.scope = match row {
                 TreeRow::AllUnread => Scope::AllUnread,
+                TreeRow::ReadLater => Scope::ReadLater,
+                TreeRow::Saved => Scope::Saved,
                 TreeRow::Category(c) => Scope::Category(c),
                 TreeRow::Feed(url, _) => Scope::Feed(url),
+                TreeRow::FavouriteFeed(url, _) => Scope::Feed(url),
+                TreeRow::Tag(t) => Scope::Tag(t),
+                TreeRow::Favourite => Scope::AllUnread,
             };
             self.list_sel = 0;
             self.rebuild_list();
@@ -188,20 +274,41 @@ impl App {
 
     fn rebuild_list(&mut self) {
         let mut items: Vec<(String, Item)> = Vec::new();
-        let feed_urls: Vec<String> = match &self.scope {
-            Scope::AllUnread => self.feeds.feeds.iter().map(|f| f.url.clone()).collect(),
-            Scope::Category(cat) => self
-                .feeds
-                .by_category(cat)
-                .iter()
-                .map(|f| f.url.clone())
-                .collect(),
-            Scope::Feed(url) => vec![url.clone()],
-        };
-        for url in feed_urls {
-            if let Ok(list) = self.db.items_for_feed(&url) {
-                for i in list {
-                    items.push((url.clone(), i));
+        match &self.scope {
+            Scope::AllUnread => {
+                for f in &self.feeds.feeds {
+                    if let Ok(list) = self.db.items_for_feed(&f.url) {
+                        for i in list {
+                            items.push((f.url.clone(), i));
+                        }
+                    }
+                }
+            }
+            Scope::ReadLater => items = self.db.items_with_flag("read_later").unwrap_or_default(),
+            Scope::Saved => items = self.db.items_with_flag("saved").unwrap_or_default(),
+            Scope::Category(cat) => {
+                for f in self.feeds.by_category(cat) {
+                    if let Ok(list) = self.db.items_for_feed(&f.url) {
+                        for i in list {
+                            items.push((f.url.clone(), i));
+                        }
+                    }
+                }
+            }
+            Scope::Feed(url) => {
+                if let Ok(list) = self.db.items_for_feed(url) {
+                    for i in list {
+                        items.push((url.clone(), i));
+                    }
+                }
+            }
+            Scope::Tag(tag) => {
+                for f in self.feeds.feeds.iter().filter(|f| f.has_tag(tag)) {
+                    if let Ok(list) = self.db.items_for_feed(&f.url) {
+                        for i in list {
+                            items.push((f.url.clone(), i));
+                        }
+                    }
                 }
             }
         }
@@ -277,11 +384,12 @@ impl App {
         }
         self.fetching = true;
         self.status = format!("fetching {}", item.url);
+        let timeout = self.cfg.fetch_timeout;
         let tx = self.tx.clone();
         let url = item.url.clone();
         let guid = item.guid.clone();
         thread::spawn(move || {
-            let result = fetch::fetch_article(&url);
+            let result = fetch::fetch_article(&url, timeout);
             tx.send(Msg::ArticleFetched { url, guid, result }).ok();
         });
     }
@@ -335,6 +443,8 @@ impl App {
                     title,
                     custom_name: false,
                     tags,
+                    feed_tags: Vec::new(),
+                    favourite: false,
                 };
                 self.feeds.upsert(feed);
                 self.save_urls();
@@ -408,9 +518,10 @@ impl App {
 
     fn refresh_feed_thread(&mut self, url: String) {
         self.pending_refreshes += 1;
+        let timeout = self.cfg.fetch_timeout;
         let tx = self.tx.clone();
         thread::spawn(move || {
-            let result = fetch::refresh_feed(&url);
+            let result = fetch::refresh_feed(&url, timeout);
             tx.send(Msg::FeedRefreshed { url, result }).ok();
         });
     }
@@ -433,7 +544,10 @@ impl App {
     fn handle_feed_refreshed(&mut self, url: String, result: Result<Vec<Item>, String>) {
         self.pending_refreshes = self.pending_refreshes.saturating_sub(1);
         match result {
-            Ok(items) => {
+            Ok(mut items) => {
+                if let Some(cap) = self.cfg.max_items_per_feed {
+                    items.truncate(cap);
+                }
                 self.db.replace_feed_items_preserving_read(&url, &items).ok();
                 self.status = format!("refreshed {url} ({} items)", items.len());
             }
@@ -458,6 +572,8 @@ impl App {
                         summary: String::new(),
                         content: String::new(),
                         date: String::new(),
+                        read_later: false,
+                        saved: false,
                     }),
                 };
                 self.db.update_item_content(&feed_url, &guid, &html).ok();
@@ -473,6 +589,16 @@ impl App {
     // ── actions ───────────────────────────────────────────────────────────
 
     fn mark_all_read(&mut self) {
+        // flag-scoped views: mark the scoped items read directly
+        if matches!(self.scope, Scope::ReadLater | Scope::Saved | Scope::Tag(_)) {
+            let items = self.scoped_items.clone();
+            for (url, i) in items {
+                self.db.set_read(&url, &i.guid, true).ok();
+            }
+            self.rebuild_list();
+            self.status = "marked all read".into();
+            return;
+        }
         let urls: Vec<String> = match &self.scope {
             Scope::AllUnread => self.feeds.feeds.iter().map(|f| f.url.clone()).collect(),
             Scope::Category(cat) => self
@@ -482,6 +608,8 @@ impl App {
                 .map(|f| f.url.clone())
                 .collect(),
             Scope::Feed(url) => vec![url.clone()],
+            // unreachable: flag/tag scopes handled above
+            Scope::ReadLater | Scope::Saved | Scope::Tag(_) => Vec::new(),
         };
         for u in urls {
             self.db.mark_all_read(&u).ok();
@@ -502,11 +630,12 @@ impl App {
             self.status = "no url".into();
             return;
         }
-        let _ = std::process::Command::new("xdg-open")
+        let cmd = self.cfg.browser.clone().unwrap_or_else(|| "xdg-open".to_string());
+        let _ = std::process::Command::new(&cmd)
             .arg(&item.url)
             .spawn()
             .map_err(|e| {
-                self.status = format!("xdg-open failed: {e}");
+                self.status = format!("{cmd} failed: {e}");
             });
         self.status = format!("opened {}", item.url);
     }
@@ -624,6 +753,12 @@ impl App {
             }
             KeyCode::Char('o') => self.open_browser(),
             KeyCode::Char('u') => self.toggle_read(),
+            KeyCode::Char('t') if self.focus == 0 => self.cycle_preset(),
+            // f: favourite the selected feed (nav)
+            KeyCode::Char('f') if self.focus == 0 => self.toggle_favourite_feed(),
+            // L / S: item flags from the article view
+            KeyCode::Char('L') if self.focus == 2 => self.toggle_item_flag("read_later"),
+            KeyCode::Char('S') if self.focus == 2 => self.toggle_item_flag("saved"),
             KeyCode::Tab => self.focus = (self.focus + 1) % 3,
             KeyCode::BackTab => self.focus = (self.focus + 2) % 3,
             KeyCode::Char('a') if self.focus == 0 => self.start_input(InputMode::AddUrl),
@@ -656,6 +791,30 @@ impl App {
         }
     }
 
+    /// Toggle favourite on the selected feed row (persists to urls file).
+    fn toggle_favourite_feed(&mut self) {
+        let Some(TreeRow::Feed(url, _)) = self.tree_rows.get(self.tree_sel).cloned() else {
+            return;
+        };
+        let new_state = {
+            let Some(f) = self.feeds.feeds.iter_mut().find(|f| f.url == url) else {
+                return;
+            };
+            f.favourite = !f.favourite;
+            f.favourite
+        };
+        self.save_urls();
+        self.rebuild_tree();
+        self.status = if new_state { "favourited".into() } else { "unfavourited".into() };
+    }
+
+    /// Toggle read_later / saved flag on the current item.
+    fn toggle_item_flag(&mut self, flag: &str) {
+        let Some((url, item)) = self.current_item() else { return };
+        self.db.toggle_flag(&url, &item.guid, flag).ok();
+        self.rebuild_list();
+    }
+
     /// Left: article→list→nav→parent in file tree.
     fn go_left(&mut self) {
         match self.focus {
@@ -679,8 +838,8 @@ impl App {
         }
     }
 
-    /// Nav left: feed → fold its parent category; expanded category →
-    /// collapse; collapsed category / All Unread → All Unread (root).
+    /// Nav left: feed → fold its parent category / favourite section;
+    /// expanded category → collapse; else → first row (root).
     fn nav_left(&mut self) {
         match self.tree_rows.get(self.tree_sel).cloned() {
             Some(TreeRow::Feed(url, _)) => {
@@ -705,6 +864,13 @@ impl App {
                     self.tree_sel = 0;
                 }
             }
+            Some(TreeRow::FavouriteFeed(_, _)) => {
+                self.fav_expanded = false;
+                self.rebuild_tree();
+                if let Some(idx) = self.tree_rows.iter().position(|r| matches!(r, TreeRow::Favourite)) {
+                    self.tree_sel = idx;
+                }
+            }
             Some(TreeRow::Category(cat)) => {
                 if self.collapsed.contains(&cat) {
                     self.tree_sel = 0;
@@ -713,15 +879,19 @@ impl App {
                     self.rebuild_tree();
                 }
             }
-            _ => {}
+            _ => self.tree_sel = 0,
         }
     }
 
-    /// Nav right: collapsed category → expand; else descend into scope.
+    /// Nav right: collapsed category/favourite → expand; else descend into scope.
     fn nav_right(&mut self) {
         match self.tree_rows.get(self.tree_sel).cloned() {
             Some(TreeRow::Category(cat)) if self.collapsed.contains(&cat) => {
                 self.collapsed.remove(&cat);
+                self.rebuild_tree();
+            }
+            Some(TreeRow::Favourite) if !self.fav_expanded => {
+                self.fav_expanded = true;
                 self.rebuild_tree();
             }
             Some(row) => self.select_scope(&row),
@@ -828,10 +998,11 @@ fn render(frame: &mut Frame, app: &mut App) {
         }
         return;
     }
+    let r = app.cfg.pane_ratio;
     let [nav, list, article] = Layout::horizontal([
-        Constraint::Percentage(15),
-        Constraint::Percentage(15),
-        Constraint::Percentage(70),
+        Constraint::Percentage((r[0] * 100.0) as u16),
+        Constraint::Percentage((r[1] * 100.0) as u16),
+        Constraint::Percentage((r[2] * 100.0) as u16),
     ])
     .areas(main);
     app.article_area = article;
@@ -855,10 +1026,31 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
         let (text, style) = match row {
             TreeRow::AllUnread => {
                 let n = app.db.total_unread().unwrap_or(0);
-                (
-                    format!("All Unread ({n})"),
-                    Style::default().add_modifier(Modifier::BOLD),
-                )
+                (format!("Unread ({n})"), Style::default().add_modifier(Modifier::BOLD))
+            }
+            TreeRow::ReadLater => {
+                let n = app.db.items_with_flag("read_later").unwrap_or_default().len();
+                (format!("Read Later ({n})"), Style::default().add_modifier(Modifier::BOLD))
+            }
+            TreeRow::Saved => {
+                let n = app.db.items_with_flag("saved").unwrap_or_default().len();
+                (format!("Saved ({n})"), Style::default().add_modifier(Modifier::BOLD))
+            }
+            TreeRow::Favourite => {
+                let n = app.feeds.feeds.iter().filter(|f| f.favourite).count();
+                let prefix = if app.fav_expanded { "▾" } else { "▸" };
+                (format!("{prefix} Favourite ({n})"), Style::default().add_modifier(Modifier::BOLD))
+            }
+            TreeRow::FavouriteFeed(_, name) => {
+                let f = app
+                    .feeds
+                    .feeds
+                    .iter()
+                    .find(|x| x.display_name() == name.as_str());
+                let n = f
+                    .map(|x| app.db.unread_count(&x.url).unwrap_or(0))
+                    .unwrap_or(0);
+                (format!("  ♥ {name} ({n})"), Style::default())
             }
             TreeRow::Category(cat) => {
                 let n: usize = app
@@ -873,6 +1065,15 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
             TreeRow::Feed(url, name) => {
                 let n = app.db.unread_count(url).unwrap_or(0);
                 (format!("  {name} ({n})"), Style::default())
+            }
+            TreeRow::Tag(t) => {
+                let n = app
+                    .feeds
+                    .feeds
+                    .iter()
+                    .filter(|f| f.has_tag(t))
+                    .count();
+                (format!("# {t} ({n})"), Style::default())
             }
         };
         let item = ListItem::new(text);
@@ -918,6 +1119,8 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &App) {
     }
     let title = match &app.scope {
         Scope::AllUnread => "All Unread".to_string(),
+        Scope::ReadLater => "Read Later".to_string(),
+        Scope::Saved => "Saved".to_string(),
         Scope::Category(c) => c.clone(),
         Scope::Feed(u) => app
             .feeds
@@ -926,6 +1129,7 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &App) {
             .find(|f| &f.url == u)
             .map(|f| f.display_name().to_string())
             .unwrap_or_else(|| u.clone()),
+        Scope::Tag(t) => format!("#{t}"),
     };
     frame.render_widget(
         List::new(items).block(pane_block(&title, app.focus == 1)),
@@ -1088,7 +1292,19 @@ fn main() -> io::Result<()> {
     let cfg = Config::load();
     let mut app = App::new(cfg);
     app.db.cleanup_content(app.cfg.cache_ttl_days).ok();
-    app.refresh_all();
+    if app.cfg.refresh_on_startup {
+        app.refresh_all();
+    }
+    // interval auto-refresh
+    if let Some(interval_min) = app.cfg.refresh_interval_minutes {
+        if interval_min > 0 {
+            let tx = app.tx.clone();
+            thread::spawn(move || loop {
+                thread::sleep(Duration::from_secs(interval_min * 60));
+                tx.send(Msg::RefreshTick).ok();
+            });
+        }
+    }
 
     let mut terminal = ratatui::init();
     let result = run(&mut terminal, &mut app);
@@ -1112,6 +1328,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()>
                 Msg::ArticleFetched { url, guid, result } => {
                     app.handle_article_fetched(url, guid, result)
                 }
+                Msg::RefreshTick => app.refresh_all(),
             }
         }
     }

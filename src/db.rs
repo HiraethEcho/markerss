@@ -30,12 +30,24 @@ impl Db {
                 content  TEXT NOT NULL DEFAULT '',
                 date     TEXT NOT NULL DEFAULT '',
                 read     INTEGER NOT NULL DEFAULT 0,
+                read_later INTEGER NOT NULL DEFAULT 0,
+                saved    INTEGER NOT NULL DEFAULT 0,
                 fetched_at TEXT NOT NULL DEFAULT '',
                 PRIMARY KEY (feed_url, guid)
             );
             CREATE INDEX IF NOT EXISTS idx_items_feed ON items(feed_url, read);
             ",
         )?;
+        // migrate older DBs (add flag columns if missing)
+        for (col, def) in [("read_later", "INTEGER NOT NULL DEFAULT 0"), ("saved", "INTEGER NOT NULL DEFAULT 0")] {
+            let has: bool = conn
+                .prepare("SELECT 1 FROM pragma_table_info('items') WHERE name = ?1")?
+                .query_row([col], |_| Ok(true))
+                .unwrap_or(false);
+            if !has {
+                conn.execute(&format!("ALTER TABLE items ADD COLUMN {col} {def}"), [])?;
+            }
+        }
         Ok(Db { conn })
     }
 
@@ -50,17 +62,33 @@ impl Db {
             // capture existing read flags + fetched content BEFORE deleting
             let mut read_guids: std::collections::HashSet<String> = Default::default();
             let mut content_map: std::collections::HashMap<String, String> = Default::default();
+            let mut later_map: std::collections::HashSet<String> = Default::default();
+            let mut saved_map: std::collections::HashSet<String> = Default::default();
             {
-                let mut q = tx.prepare("SELECT guid, read, content FROM items WHERE feed_url = ?1")?;
+                let mut q = tx.prepare(
+                    "SELECT guid, read, content, read_later, saved FROM items WHERE feed_url = ?1",
+                )?;
                 let rows = q.query_map([feed_url], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?))
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, i64>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, i64>(3)?,
+                        r.get::<_, i64>(4)?,
+                    ))
                 })?;
                 for row in rows.flatten() {
                     if row.1 != 0 {
                         read_guids.insert(row.0.clone());
                     }
                     if !row.2.is_empty() {
-                        content_map.insert(row.0, row.2);
+                        content_map.insert(row.0.clone(), row.2);
+                    }
+                    if row.3 != 0 {
+                        later_map.insert(row.0.clone());
+                    }
+                    if row.4 != 0 {
+                        saved_map.insert(row.0);
                     }
                 }
             }
@@ -68,11 +96,13 @@ impl Db {
             del.execute([feed_url])?;
             let mut ins = tx.prepare(
                 "INSERT OR REPLACE INTO items
-                 (feed_url, guid, title, url, summary, content, date, read)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                 (feed_url, guid, title, url, summary, content, date, read, read_later, saved)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             )?;
             for i in items {
                 let read = if read_guids.contains(&i.guid) { 1 } else { 0 };
+                let later = if later_map.contains(&i.guid) { 1 } else { 0 };
+                let saved = if saved_map.contains(&i.guid) { 1 } else { 0 };
                 // keep previously fetched content; new items are summary-only
                 let content = content_map.get(&i.guid).cloned().unwrap_or_default();
                 ins.execute(rusqlite::params![
@@ -83,7 +113,9 @@ impl Db {
                     i.summary,
                     content,
                     i.date,
-                    read
+                    read,
+                    later,
+                    saved
                 ])?;
             }
         }
@@ -100,9 +132,10 @@ impl Db {
     }
 
     pub fn items_for_feed(&self, feed_url: &str) -> rusqlite::Result<Vec<Item>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT guid, title, url, summary, content, date FROM items WHERE feed_url = ?1")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT guid, title, url, summary, content, date, read_later, saved
+             FROM items WHERE feed_url = ?1",
+        )?;
         let rows = stmt.query_map([feed_url], |r| {
             Ok(Item {
                 guid: r.get(0)?,
@@ -111,9 +144,59 @@ impl Db {
                 summary: r.get(3)?,
                 content: r.get(4)?,
                 date: r.get(5)?,
+                read_later: r.get::<_, i64>(6)? != 0,
+                saved: r.get::<_, i64>(7)? != 0,
             })
         })?;
         rows.collect()
+    }
+
+    /// All (feed_url, item) pairs with a flag set — for virtual nodes.
+    pub fn items_with_flag(&self, flag: &str) -> rusqlite::Result<Vec<(String, Item)>> {
+        let col = match flag {
+            "read_later" => "read_later",
+            "saved" => "saved",
+            _ => return Ok(Vec::new()),
+        };
+        let sql = format!(
+            "SELECT feed_url, guid, title, url, summary, content, date, read_later, saved
+             FROM items WHERE {col} = 1"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get(0)?,
+                Item {
+                    guid: r.get(1)?,
+                    title: r.get(2)?,
+                    url: r.get(3)?,
+                    summary: r.get(4)?,
+                    content: r.get(5)?,
+                    date: r.get(6)?,
+                    read_later: r.get::<_, i64>(7)? != 0,
+                    saved: r.get::<_, i64>(8)? != 0,
+                },
+            ))
+        })?;
+        rows.collect()
+    }
+
+    pub fn set_flag(&mut self, feed_url: &str, guid: &str, flag: &str, on: bool) -> rusqlite::Result<()> {
+        let col = match flag {
+            "read_later" => "read_later",
+            "saved" => "saved",
+            _ => return Ok(()),
+        };
+        let sql = format!("UPDATE items SET {col} = ?3 WHERE feed_url = ?1 AND guid = ?2");
+        self.conn.execute(&sql, rusqlite::params![feed_url, guid, on as i64])?;
+        Ok(())
+    }
+
+    pub fn toggle_flag(&mut self, feed_url: &str, guid: &str, flag: &str) -> rusqlite::Result<bool> {
+        let items = self.items_with_flag(flag)?;
+        let cur = items.iter().any(|(u, i)| u == feed_url && i.guid == guid);
+        self.set_flag(feed_url, guid, flag, !cur)?;
+        Ok(!cur)
     }
 
     pub fn is_read(&self, feed_url: &str, guid: &str) -> rusqlite::Result<bool> {
@@ -169,7 +252,7 @@ impl Db {
         let cutoff = (chrono::Utc::now() - chrono::Duration::days(ttl_days as i64))
             .to_rfc3339();
         self.conn.execute(
-            "UPDATE items SET content = '' WHERE fetched_at != '' AND fetched_at < ?1",
+            "UPDATE items SET content = '' WHERE fetched_at != '' AND fetched_at < ?1 AND saved = 0",
             [cutoff],
         )?;
         Ok(())
@@ -200,6 +283,8 @@ mod tests {
             summary: String::new(),
             content: String::new(),
             date: String::new(),
+            read_later: false,
+            saved: false,
         }
     }
 
@@ -242,5 +327,58 @@ mod tests {
         let items = db.items_for_feed("https://f.com").unwrap();
         assert_eq!(items[0].content, "<p>full</p>");
         assert!(db.is_read("https://f.com", "a").unwrap());
+    }
+}
+
+#[cfg(test)]
+mod flag_tests {
+    use super::*;
+
+    fn db() -> Db {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        let path = std::env::temp_dir().join(format!("markerss-flags-{}-{}.db", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+        let _ = std::fs::remove_file(&path);
+        Db::open(&path).unwrap()
+    }
+
+    fn item(guid: &str) -> Item {
+        Item { guid: guid.into(), title: String::new(), url: String::new(), summary: String::new(), content: String::new(), date: String::new(), read_later: false, saved: false }
+    }
+
+    #[test]
+    fn flags_toggle_and_persist() {
+        let mut d = db();
+        d.replace_feed_items_preserving_read("f", &[item("a"), item("b")]).unwrap();
+        assert!(d.toggle_flag("f", "a", "read_later").unwrap());
+        assert!(d.toggle_flag("f", "b", "saved").unwrap());
+        let later = d.items_with_flag("read_later").unwrap();
+        assert_eq!(later.len(), 1);
+        assert_eq!(later[0].0, "f");
+        assert!(later[0].1.read_later);
+        let saved = d.items_with_flag("saved").unwrap();
+        assert_eq!(saved.len(), 1);
+        // refresh preserves flags
+        d.replace_feed_items_preserving_read("f", &[item("a"), item("b"), item("c")]).unwrap();
+        assert_eq!(d.items_with_flag("read_later").unwrap().len(), 1);
+        assert_eq!(d.items_with_flag("saved").unwrap().len(), 1);
+        // toggle off
+        assert!(!d.toggle_flag("f", "a", "read_later").unwrap());
+        assert_eq!(d.items_with_flag("read_later").unwrap().len(), 0);
+    }
+
+    #[test]
+    fn old_db_migrates_columns() {
+        // create a pre-flag db, reopen → columns added
+        let path = std::env::temp_dir().join(format!("markerss-migrate-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        {
+            let c = rusqlite::Connection::open(&path).unwrap();
+            c.execute_batch("CREATE TABLE items (feed_url TEXT NOT NULL, guid TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '', summary TEXT NOT NULL DEFAULT '', content TEXT NOT NULL DEFAULT '', date TEXT NOT NULL DEFAULT '', read INTEGER NOT NULL DEFAULT 0, fetched_at TEXT NOT NULL DEFAULT '', PRIMARY KEY (feed_url, guid));").unwrap();
+        }
+        let mut d = Db::open(&path).unwrap();
+        d.replace_feed_items_preserving_read("f", &[item("x")]).unwrap();
+        assert_eq!(d.items_with_flag("saved").unwrap().len(), 0);
+        std::fs::remove_file(&path).ok();
     }
 }
