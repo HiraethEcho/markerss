@@ -768,6 +768,9 @@ impl App {
                     self.status =
                         format!("fetched {url} ({} new)", added.len());
                     self.append_new_unread(&url, &added);
+                    // in-place refresh of snapshot entries (content etc.) —
+                    // no rebuild, so read items stay in place
+                    self.refresh_snapshot_content(&url);
                 }
             }
             Err(e) => self.status = e,
@@ -778,6 +781,27 @@ impl App {
         if full {
             self.rebuild_list();
         }
+    }
+
+    /// Update the in-memory list snapshot for one feed from the DB
+    /// (content/summary/title) without rebuilding or reordering.
+    fn refresh_snapshot_content(&mut self, feed_url: &str) {
+        let Ok(list) = self.db.items_for_feed(feed_url) else {
+            return;
+        };
+        let by_guid: std::collections::HashMap<String, Item> =
+            list.into_iter().map(|i| (i.guid.clone(), i)).collect();
+        for (u, i) in self.scoped_items.iter_mut() {
+            if u == feed_url {
+                if let Some(fresh) = by_guid.get(&i.guid) {
+                    i.content = fresh.content.clone();
+                    i.summary = fresh.summary.clone();
+                    i.title = fresh.title.clone();
+                }
+            }
+        }
+        // the article body cache may reference the old content
+        self.article_render = None;
     }
 
     /// Append newly-fetched unread items to the current list (no reorder of
@@ -825,18 +849,9 @@ impl App {
         self.fetching = false;
         match result {
             Ok(html) => {
-                let (feed_url, _) = match self.current_item() {
-                    Some(ci) => ci,
-                    None => (String::new(), Item {
-                        guid: String::new(),
-                        title: String::new(),
-                        url: String::new(),
-                        summary: String::new(),
-                        content: String::new(),
-                        date: String::new(),
-                        read_later: false,
-                        saved: false,
-                    }),
+                let Some((feed_url, _)) = self.current_item() else {
+                    self.status = format!("fetched {} (stale view)", url);
+                    return;
                 };
                 self.db.update_item_content(&feed_url, &guid, &html).ok();
                 // content changed — invalidate the rendered-body cache
@@ -920,13 +935,11 @@ impl App {
         };
         let default_path = dir.join(format!("{slug}.md"));
         self.export_pending = Some((feed_url, item.guid));
-        let mut prompt = InputPrompt {
+        self.input = Some(InputPrompt {
             mode: InputMode::ExportFile,
             prompt: "export as (enter = default):".to_string(),
             buf: default_path.to_string_lossy().to_string(),
-        };
-        prompt.buf = default_path.to_string_lossy().to_string();
-        self.input = Some(prompt);
+        });
     }
 
     /// Finish the export after the rename prompt (or default path).
@@ -1762,7 +1775,7 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
 
 fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
     let line = format!(
-        "{}  |  ? help  q quit  tab focus  j/k move  enter open  o browser  e export  u read  A all-read  r refresh",
+        "{}  |  ? help  Q quit  tab focus  j/k move  l/enter open  o browser  e export  a read  A all-read  r fetch  R refresh",
         app.status
     );
     frame.render_widget(Paragraph::new(line), area);
