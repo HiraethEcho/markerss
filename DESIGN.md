@@ -83,7 +83,7 @@ Directional movement: `h`/`q`/`esc` = LEFT, `l`/`enter` = RIGHT (+ arrow keys `�
 - List `n`/`p` — mark current read, jump to next/prev unread (no reorder).
 - **List semantics**: the list is a snapshot taken at startup / manual refresh (`R`) / scope change. Auto fetch (`r`/startup/interval) only **appends new unread items** — read items stay in place, never reordered, until manual refresh or restart.
 - **Read-later lifecycle**: marking read-later also marks the item unread; opening/reading an item clears its read-later flag.
-- Article pane: list mode shows summary only; article mode shows the RSS body (blank if none); `n/p` next/prev item; `j/k` scroll; ctrl+u/ctrl+d half-page.
+- Article pane: list mode shows summary only; article mode shows the RSS body (blank if none); `n/p` next/prev item; `j/k` scroll; ctrl+u/ctrl+d half-page (list too).
 
 ### Storage
 
@@ -146,12 +146,12 @@ Directional movement: `h`/`q`/`esc` = LEFT, `l`/`enter` = RIGHT (+ arrow keys `�
 | n/p | article | next/prev item (marks read, clears read-later) |
 | a | list+article | toggle read/unread |
 | A | list | mark all unread in view read |
-| <c-u>/<c-d> | article | scroll half page |
+| <c-u>/<c-d> | list+article | scroll half page |
 | o | list+article | open in browser |
 | e | list+article | export markdown (rename prompt, default prefilled) |
 | N | nav | add feed (URL → title → category → tags prompts) |
 | d | nav | delete feed (press twice to confirm) |
-| M | nav | rename — feed custom title / category / tag (contextual) |
+| M | nav | modify — feed custom title / category / tags (contextual) |
 | T | nav | edit feed tags (prefilled) |
 | F | nav / article | nav: favourite feed · article: toggle fullscreen |
 | L / S | list+article | toggle read-later / saved (again to cancel; L marks unread) |
