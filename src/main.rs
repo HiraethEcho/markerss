@@ -1293,7 +1293,38 @@ impl App {
                 self.list_sel = self.list_sel.saturating_sub(1);
                 self.article_scroll = 0;
             }
+            // n/p: mark current read, jump to next/prev unread
+            KeyCode::Char('n') => self.mark_read_and_jump(1),
+            KeyCode::Char('p') => self.mark_read_and_jump(-1),
             _ => {}
+        }
+    }
+
+    /// Mark the current item read, then select the next/previous unread
+    /// item in the current list (no reorder).
+    fn mark_read_and_jump(&mut self, dir: isize) {
+        if self.scoped_items.is_empty() {
+            return;
+        }
+        let (url, item) = self.scoped_items[self.list_sel].clone();
+        self.db.set_read(&url, &item.guid, true).ok();
+        if item.read_later {
+            self.db.set_flag(&url, &item.guid, "read_later", false).ok();
+        }
+        let n = self.scoped_items.len() as isize;
+        let mut i = self.list_sel as isize;
+        loop {
+            i += dir;
+            if i < 0 || i >= n {
+                // no unread in that direction — stay on current
+                break;
+            }
+            let (u, it) = &self.scoped_items[i as usize];
+            if !self.db.is_read(u, &it.guid).unwrap_or(false) {
+                self.list_sel = i as usize;
+                self.article_scroll = 0;
+                break;
+            }
         }
     }
 
