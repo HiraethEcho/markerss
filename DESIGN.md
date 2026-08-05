@@ -171,26 +171,21 @@ Left/right movement via `h`/`l`, `q`/`enter`/`esc`, and arrow keys (`←`/`→`)
   - `pane_ratio` — three-pane widths, e.g. `[0.15, 0.15, 0.7]`.
   - `theme` — standalone theme file (colors), separate from config.
   - `browser` — which browser to open (default: `xdg-open`).
-  - `refresh` — auto-on-startup on/off, interval.
-  - `nav_pane` — nav pane items + order, e.g. `["Unread", "Later", "Feeds"]`; overrides both default layouts.
+  - `refresh` — auto-on-startup on/off, interval (`interval_minutes`).
+  - `nav_presets` — list of nav section arrays, e.g. `[["Unread", "Feeds"], ["Unread", "Later"]]`; replaces the preset list (first = initial).
   - `images` — kitty image render on/off.
+  - `fetch_timeout` — per-request timeout.
+  - `max_items_per_feed` — cap items kept per feed.
+  - `proxy` — HTTP proxy.
+  - `keybindings` — custom keymap.
+  - `default_view` — startup scope, e.g. `Feed:<url>` / `Category:<name>`.
 - Read at startup; defaults + XDG fallbacks when keys absent. No hot-reload in MVP.
 
-### Nav Pane Layout
+### Nav Pane Presets
 
-- Two default layouts, toggle key `t`:
-  - **Full**: Unread, Read Later, Favourite, Categories/{cat/{feeds}}, Tags/{tags}, Saved
-  - **Simple**: Unread, Feeds/{feed1, feed2}
-- `nav_pane` set → replaces both defaults; unset → `t` toggles Full ↔ Simple.
-- Valid `nav_pane` items: `Unread`, `Read Later`, `Favourite`, `Saved`, `Categories`, `Tags`, `Feeds`.
-
-### Suggested additional keys (optional)
-
-- `fetch_timeout` — per-request timeout for full-content fetch.
-- `max_items_per_feed` — cap items kept per feed.
-- `proxy` — HTTP proxy for fetch.
-- `keybindings` — custom keymap file.
-- `default_view` — startup scope (e.g. All Unread, a category).
+- Each preset = array of nav sections; one default full preset: `[Unread, Read Later, Favourite, Categories, Tags, Saved]`.
+- `nav_presets` replaces the list; first entry is the initial preset; `t` cycles through all presets (wrap).
+- Valid sections: `Unread` (All Unread), `Read Later`, `Favourite`, `Saved`, `Categories` (tree), `Tags`, `Feeds`.
 
 ### Decisions
 
@@ -201,26 +196,23 @@ Left/right movement via `h`/`l`, `q`/`enter`/`esc`, and arrow keys (`←`/`→`)
 | Theme | standalone file, referenced by `theme` key | colors ≠ app settings; swappable | 2026-08 |
 | Pane ratio | `pane_ratio` key, default 0.15/0.15/0.7 | user-adjustable layout | 2026-08 |
 | Browser | `browser` key, default xdg-open | user choice | 2026-08 |
-| Nav layout | `nav_pane` config + 2 defaults + `t` toggle | user control | 2026-08 |
+| Nav layout | multiple presets (arrays), one full default, `t` cycles | user control | 2026-08 |
 | Reload | startup only | MVP simplicity | 2026-08 |
 
 ## Tags & Favorites
 
 ### Virtual nodes
 
-- `Read Later`, `Favourite`, `Saved` = virtual nodes in nav, like `All Unread` — aggregate items by flag, no new storage.
+- **Favourite = feed-level**: `f` on a nav feed row toggles the feed's favourite; marker persisted in the urls file; Favourite node lists favourited feeds (category-tree presentation).
+- **Read Later / Saved = item-level**: `L` / `S` in the article view toggle; nodes aggregate flagged items across feeds (All Unread pattern); independent, item can carry both.
 - `saved` = items kept in DB without markdown; exempt from TTL cleanup.
 
 ### Tags
 
-- Tags are **per-feed**: each feed has 0..n tags (`#tag` in urls file), plus exactly one category.
+- Tags are **per-feed only**: each feed has 0..n tags (`#tag` in urls file), plus exactly one category.
 - Tags list in nav pane (below Categories).
 - Selecting a tag filters the list pane to items from feeds carrying that tag.
-- Tags can also be assigned to individual items from the article view.
-
-### Flags
-
-- Per-item boolean flags: `read_later`, `favorite`, `saved` — independent, toggle from article view.
+- **No per-item tags.**
 
 ### Decisions
 
@@ -228,10 +220,11 @@ Left/right movement via `h`/`l`, `q`/`enter`/`esc`, and arrow keys (`←`/`→`)
 |---|---|---|---|
 | Tags | per-feed, multi (`#tag`), optional; one category | category = structure, tags = cross-cutting | 2026-08 |
 | Virtual nodes | Read Later / Favourite / Saved, like All Unread | reuses All Unread aggregation; no new storage | 2026-08 |
-| Flags | independent booleans `read_later` / `favorite` / `saved` | orthogonal, item can have several | 2026-08 |
+| Favourite | feed-level flag, `f` in nav, urls file marker | favourites = feeds you track | 2026-08 |
+| Read Later / Saved | item-level flags, `L`/`S` in article | orthogonal, item can carry both | 2026-08 |
 | Saved | kept in DB, exempt from TTL cleanup, no markdown | keep without export | 2026-08 |
 | Tags placement | tags list in nav pane (below Categories) | second nav region, not new pane | 2026-08 |
-| Tag storage | per-feed in urls file; per-item in DB | queryable | 2026-08 |
+| Tag storage | per-feed in urls file only | queryable; no item tags | 2026-08 |
 
 ## Article Polish
 

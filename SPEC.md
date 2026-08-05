@@ -48,9 +48,9 @@ User-configurable app settings via a config file.
 ### What We're Building
 - Config file at `$XDG_CONFIG_HOME/markerss/config`, separate from `urls` subscriptions file
 - Format: JSON, JSONC, TOML, or YAML — detected by extension (`.json`/`.jsonc`/`.toml`/`.yaml`/`.yml`); plain `config` defaults to one (TOML)
-- Keys: `cache_ttl_days` (startup purge), `export_dir` (export location), `pane_ratio` (three-pane widths, e.g. 0.15/0.15/0.7), `theme` (standalone color file), `browser` (which browser to open), `refresh` (auto-on-startup on/off, interval), `nav_pane` (nav items array, e.g. `["Unread", "Later", "Feeds"]`), `images` (kitty image render on/off)
+- Keys: `cache_ttl_days` (startup purge), `export_dir` (export location), `pane_ratio` (three-pane widths, e.g. 0.15/0.15/0.7), `theme` (standalone color file), `browser` (which browser to open), `refresh` (auto-on-startup on/off, interval), `nav_presets` (list of nav section arrays, e.g. `[["Unread", "Feeds"], ["Unread", "Later"]]`), `images` (kitty image render on/off)
 - Optional: `fetch_timeout`, `max_items_per_feed`, `proxy`, `keybindings`, `default_view`
-- Nav pane layout: two defaults — full (Unread/Read Later/Favourite/Categories/Tags/Saved) and simple (Unread/Feeds); `t` toggles; `nav_pane` array overrides both
+- Nav pane: multiple layout presets, each preset = array of sections; one default full preset (Unread/Read Later/Favourite/Categories/Tags/Saved); `nav_presets` replaces the list (first = initial); `t` cycles presets (wrap)
 - Defaults when keys absent; XDG fallbacks per spec
 - Read at startup; changes require restart (no hot-reload in MVP)
 
@@ -62,29 +62,30 @@ User-configurable app settings via a config file.
 | Theme | standalone file, referenced by `theme` key | colors ≠ app settings; swappable | 2026-08 |
 | Pane ratio | `pane_ratio` key, default 0.15/0.15/0.7 | user-adjustable layout | 2026-08 |
 | Browser | `browser` key, default xdg-open | user choice | 2026-08 |
-| Nav layout | `nav_pane` config + 2 defaults + `t` toggle | user control | 2026-08 |
+| Nav layout | multiple presets (arrays), one full default, `t` cycles | user control | 2026-08 |
 | Reload | startup only | MVP simplicity | 2026-08 |
 
 ## Tags & Favorites
 
 ### Goal
-Organize items beyond feeds: tags in a lower nav strip; favorites as a special category.
+Organize beyond feeds: favourites (feed-level) and read-later/saved (item-level); feed tags.
 
 ### What We're Building
-- Virtual nodes in nav: Read Later / Favourite / Saved (like All Unread) — aggregate items by flag, no new storage
+- **Favourite = feed-level**: `f` on a nav feed row toggles the feed's favourite (persisted in urls file); Favourite node = list of favourited feeds (same presentation as category tree)
+- **Read Later / Saved = item-level**: `L`/`S` in article view toggle per-item flags; nodes aggregate flagged items like All Unread; independent, item can carry both
 - `saved` = kept in DB without markdown, exempt from TTL cleanup
-- Tags: per-feed, 0..n (`#tag` in urls file), plus exactly one category; tags list in nav (below Categories); select tag → filter list to feeds carrying it; tags also assignable to items from article view
-- Flags: per-item booleans `read_later` / `favorite` / `saved` — independent, toggle from article view
+- Tags: per-feed only, 0..n (`#tag` in urls file) plus exactly one category; tags list in nav (below Categories); select tag → filter list to feeds carrying it; no per-item tags
 
 ### Decisions
 | Decision | Choice | Rationale | Date |
 |---|---|---|---|
-| Tags | per-feed, multi (`#tag`), optional; one category | category = structure, tags = cross-cutting | 2026-08 |
-| Virtual nodes | Read Later / Favourite / Saved, like All Unread | reuses All Unread aggregation; no new storage | 2026-08 |
-| Flags | independent booleans `read_later` / `favorite` / `saved` | orthogonal, item can have several | 2026-08 |
+| Tags | per-feed only, multi (`#tag`), optional; one category | category = structure, tags = cross-cutting | 2026-08 |
+| Favourite | feed-level flag, `f` in nav, urls file marker | favorites = feeds you track | 2026-08 |
+| Read Later / Saved | item-level flags, `L`/`S` in article | orthogonal, item can carry both | 2026-08 |
+| Virtual nodes | Favourite = feed list; Read Later / Saved = item aggregation | reuses All Unread aggregation pattern | 2026-08 |
 | Saved | kept in DB, exempt from TTL cleanup, no markdown | keep without export | 2026-08 |
 | Tags placement | tags list in nav pane (below Categories) | second nav region, not new pane | 2026-08 |
-| Tag storage | per-feed in urls file; per-item in DB | queryable | 2026-08 |
+| Tag storage | per-feed in urls file | queryable, no item tags | 2026-08 |
 
 ## Article Polish
 
