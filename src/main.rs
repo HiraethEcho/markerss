@@ -189,9 +189,18 @@ impl App {
             });
         let mut rows: Vec<TreeRow> = Vec::new();
         for section in preset {
-            // Favourite renders as its own node + children (no separate header)
-            if section != "Favourite" {
+            // single-node sections (Unread / Read Later / Saved / Favourite)
+            // render as the node itself; list sections get a foldable header
+            let is_node_section = matches!(
+                section.as_str(),
+                "Unread" | "Read Later" | "Saved" | "Favourite"
+            );
+            if !is_node_section {
                 rows.push(TreeRow::Section(section.clone()));
+            }
+            let section_collapsed = self.collapsed.contains(&section);
+            if section_collapsed {
+                continue;
             }
             match section.as_str() {
                 "Unread" => rows.push(TreeRow::AllUnread),
@@ -943,6 +952,10 @@ impl App {
                     self.tree_sel = idx;
                 }
             }
+            Some(TreeRow::Section(name)) if !self.collapsed.contains(&name) => {
+                self.collapsed.insert(name);
+                self.rebuild_tree();
+            }
             Some(TreeRow::Category(cat)) => {
                 if self.collapsed.contains(&cat) {
                     self.tree_sel = 0;
@@ -955,9 +968,13 @@ impl App {
         }
     }
 
-    /// Nav right: collapsed category/favourite → expand; else descend into scope.
+    /// Nav right: collapsed section/category/favourite → expand; else descend.
     fn nav_right(&mut self) {
         match self.tree_rows.get(self.tree_sel).cloned() {
+            Some(TreeRow::Section(name)) if self.collapsed.contains(&name) => {
+                self.collapsed.remove(&name);
+                self.rebuild_tree();
+            }
             Some(TreeRow::Section(_)) => {}
             Some(TreeRow::Category(cat)) if self.collapsed.contains(&cat) => {
                 self.collapsed.remove(&cat);
@@ -1097,12 +1114,15 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
     let mut items: Vec<ListItem> = Vec::new();
     for (i, row) in app.tree_rows.iter().enumerate() {
         let (text, style) = match row {
-            TreeRow::Section(name) => (
-                name.clone(),
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            TreeRow::Section(name) => {
+                let prefix = if app.collapsed.contains(name) { "▸" } else { "▾" };
+                (
+                    format!("{prefix} {name}"),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )
+            }
             TreeRow::AllUnread => {
                 let n = app.db.total_unread().unwrap_or(0);
                 (format!("Unread ({n})"), Style::default().add_modifier(Modifier::BOLD))
@@ -1129,7 +1149,7 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                 let n = f
                     .map(|x| app.db.unread_count(&x.url).unwrap_or(0))
                     .unwrap_or(0);
-                (format!("  ♥ {name} ({n})"), Style::default())
+                (format!("  {name} ({n})"), Style::default())
             }
             TreeRow::Category(cat) => {
                 let n: usize = app
