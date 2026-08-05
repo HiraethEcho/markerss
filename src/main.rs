@@ -260,13 +260,16 @@ impl App {
                         }
                     }
                     // uncategorized feeds as their own foldable top node
-                    rows.push(TreeRow::Uncategorized);
-                    if self.uncat_expanded {
-                        for f in self.feeds.uncategorized() {
-                            rows.push(TreeRow::UncategorizedFeed(
-                                f.url.clone(),
-                                f.display_name().to_string(),
-                            ));
+                    // (hidden when every feed has a category)
+                    if !self.feeds.uncategorized().is_empty() {
+                        rows.push(TreeRow::Uncategorized);
+                        if self.uncat_expanded {
+                            for f in self.feeds.uncategorized() {
+                                rows.push(TreeRow::UncategorizedFeed(
+                                    f.url.clone(),
+                                    f.display_name().to_string(),
+                                ));
+                            }
                         }
                     }
                 }
