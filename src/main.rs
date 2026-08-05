@@ -51,6 +51,7 @@ enum InputMode {
     RenameCategory,
     EditFeedTitle,
     EditTag,
+    ExportFile,
     ImportOpml,
 }
 
@@ -110,6 +111,7 @@ struct App {
     add_pending_title: Option<String>,
     add_pending_category: Option<Vec<String>>,
     edit_tags_url: Option<String>,
+    export_pending: Option<(String, String)>,
     rx: Receiver<Msg>,
     tx: Sender<Msg>,
 }
@@ -164,6 +166,7 @@ impl App {
             add_pending_title: None,
             add_pending_category: None,
             edit_tags_url: None,
+            export_pending: None,
             rx,
             tx,
         };
@@ -480,6 +483,7 @@ impl App {
             InputMode::RenameCategory => "new category name:".to_string(),
             InputMode::EditFeedTitle => "display title (empty = default):".to_string(),
             InputMode::EditTag => "new tag name:".to_string(),
+            InputMode::ExportFile => "export as (enter = default):".to_string(),
             InputMode::ImportOpml => "OPML file path:".to_string(),
         };
         let mut buf = String::new();
@@ -629,6 +633,15 @@ impl App {
                     self.rebuild_tree();
                     self.status = format!("tag {old} → {val}");
                 }
+            }
+            InputMode::ExportFile => {
+                let path = if val.is_empty() {
+                    // fall back to the prefilled default
+                    prompt.buf.trim().to_string()
+                } else {
+                    val
+                };
+                self.finish_export(std::path::PathBuf::from(path));
             }
             InputMode::ImportOpml => {
                 if val.is_empty() {
@@ -894,14 +907,57 @@ impl App {
         self.status = format!("opened {}", item.url);
     }
 
-    fn export_markdown(&mut self) -> io::Result<()> {
+    /// Start the export flow: prompt with the default filename as placeholder.
+    fn start_export(&mut self) {
         let Some((feed_url, item)) = self.current_item() else {
-            return Ok(());
+            self.status = "no item selected".into();
+            return;
         };
         let feed = self.feeds.feeds.iter().find(|f| f.url == feed_url);
         let category = feed.and_then(|f| f.category()).unwrap_or("");
-        let body = self.article_markdown_export(&item);
+        let slug = slugify(&item.title);
+        let dir = if category.is_empty() {
+            self.cfg.export_dir.clone()
+        } else {
+            self.cfg.export_dir.join(category)
+        };
+        let default_path = dir.join(format!("{slug}.md"));
+        self.export_pending = Some((feed_url, item.guid));
+        let mut prompt = InputPrompt {
+            mode: InputMode::ExportFile,
+            prompt: "export as (enter = default):".to_string(),
+            buf: default_path.to_string_lossy().to_string(),
+        };
+        prompt.buf = default_path.to_string_lossy().to_string();
+        self.input = Some(prompt);
+    }
 
+    /// Finish the export after the rename prompt (or default path).
+    fn finish_export(&mut self, path: std::path::PathBuf) {
+        let Some((feed_url, guid)) = self.export_pending.take() else {
+            return;
+        };
+        let Some(item) = self
+            .db
+            .items_for_feed(&feed_url)
+            .ok()
+            .and_then(|list| list.into_iter().find(|i| i.guid == guid))
+        else {
+            self.status = "export failed: item not found".into();
+            return;
+        };
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).ok();
+        }
+        match self.write_export(&path, &feed_url, &item) {
+            Ok(_) => self.status = format!("exported {}", path.display()),
+            Err(e) => self.status = format!("export failed: {e}"),
+        }
+    }
+
+    fn write_export(&self, path: &std::path::Path, feed_url: &str, item: &Item) -> io::Result<()> {
+        let feed = self.feeds.feeds.iter().find(|f| f.url == feed_url);
+        let body = self.article_markdown_export(item);
         let mut md = String::new();
         md.push_str(&format!("---\ntitle: \"{}\"\n", escape_yaml(&item.title)));
         md.push_str(&format!("link: {}\n", item.url));
@@ -914,18 +970,7 @@ impl App {
         md.push_str("---\n\n");
         md.push_str(&body);
         md.push('\n');
-
-        let slug = slugify(&item.title);
-        let dir = if category.is_empty() {
-            self.cfg.export_dir.clone()
-        } else {
-            self.cfg.export_dir.join(category)
-        };
-        std::fs::create_dir_all(&dir)?;
-        let path = dir.join(format!("{slug}.md"));
-        std::fs::write(&path, md)?;
-        self.status = format!("exported {}", path.display());
-        Ok(())
+        std::fs::write(path, md)
     }
 
     fn next_prev_item(&mut self, delta: isize) {
@@ -1009,11 +1054,7 @@ impl App {
             // a: toggle read of the current item; A: mark all in view read
             KeyCode::Char('a') => self.toggle_read(),
             KeyCode::Char('A') => self.mark_all_read(),
-            KeyCode::Char('e') => {
-                if let Err(e) = self.export_markdown() {
-                    self.status = format!("export failed: {e}");
-                }
-            }
+            KeyCode::Char('e') => self.start_export(),
             KeyCode::Char('o') => self.open_browser(),
             KeyCode::Char('t') if self.focus == 0 => self.cycle_preset(),
             // L / S: item flags from list or article pane (toggle; again to cancel)
