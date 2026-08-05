@@ -378,6 +378,10 @@ impl App {
             return;
         };
         self.db.set_read(&url, &item.guid, true).ok();
+        // reading clears read-later
+        if item.read_later {
+            self.db.set_flag(&url, &item.guid, "read_later", false).ok();
+        }
         self.focus = 2;
         self.article_scroll = 0;
         self.rebuild_list();
@@ -778,6 +782,9 @@ impl App {
         if self.focus == 2 {
             if let Some((url, item)) = self.current_item() {
                 self.db.set_read(&url, &item.guid, true).ok();
+                if item.read_later {
+                    self.db.set_flag(&url, &item.guid, "read_later", false).ok();
+                }
                 self.rebuild_list();
             }
         }
@@ -905,7 +912,11 @@ impl App {
     /// Toggle read_later / saved flag on the current item.
     fn toggle_item_flag(&mut self, flag: &str) {
         let Some((url, item)) = self.current_item() else { return };
-        self.db.toggle_flag(&url, &item.guid, flag).ok();
+        let on = self.db.toggle_flag(&url, &item.guid, flag).unwrap_or(false);
+        if flag == "read_later" && on {
+            // marking read-later also marks unread
+            self.db.set_read(&url, &item.guid, false).ok();
+        }
         self.rebuild_list();
     }
 
