@@ -441,10 +441,6 @@ impl App {
 
     fn fetch_article(&mut self) {
         let Some((_, item)) = self.current_item() else { return };
-        if !item.content.trim().is_empty() {
-            self.status = "feed already provides full content".into();
-            return;
-        }
         if item.url.is_empty() {
             self.status = "no url to fetch".into();
             return;
@@ -452,6 +448,7 @@ impl App {
         if self.fetching {
             return;
         }
+        // always try to fetch full content — even if the feed provided some
         self.fetching = true;
         self.status = format!("fetching {}", item.url);
         let timeout = self.cfg.fetch_timeout;
@@ -1677,8 +1674,9 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
         .map(|f| f.display_name().to_string())
         .unwrap_or_default();
 
-    let content_ready = !item.content.trim().is_empty() || !item.summary.trim().is_empty();
-    let fetching_hint = if app.fetching { " (fetching…)" } else { "" };
+    let in_article = app.focus == 2;
+    // list mode: summary only; article mode: feed content, then fetch hint
+    let content_ready = in_article && !item.content.trim().is_empty();
 
     // Fixed header (title/meta/summary), content scrolls below a separator.
     let block = pane_block("Article", app.focus == 2);
@@ -1746,8 +1744,13 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
             app.article_render = Some((item.guid.clone(), t.clone()));
             t
         }
+    } else if app.fetching {
+        Text::from("fetching…")
+    } else if in_article {
+        // in the article pane but the feed has no content — blank until fetched
+        Text::from("")
     } else {
-        Text::from(format!("[summary only — press enter to fetch full article{fetching_hint}]"))
+        Text::from("l/enter to read")
     };
     let para = Paragraph::new(body_text)
         .wrap(Wrap { trim: true })
