@@ -131,7 +131,7 @@ Advanced functions: OPML mapping with nested categories, more keys (details TBD 
 - Vim-like keys: `gg` / `G` top/end; `zr`/`zm` fold ±1, `zR`/`zM` unfold all/fold all — nav pane (also list); `Ctrl+f`/`Ctrl+b` full page; `zt`/`zz`/`zb` scroll cursor; `{`/`}` paragraph jump; `[`/`]` section jump (h2/h3 headings)
 - `/` modal search in list: while active `n` = next match (search owns `n`); esc exits
 - Copy keys: `yy` item URL, `yn` item title, `yf` feed URL
-- Sort: `st`/`sn`/`sf`/`su` push sort level — **last pressed = highest priority** (front of array): `st` → `["time"]`, then `sf` → `["feed", "time"]`; keep only last 3 (oldest dropped); `s` reverse (**`S` is taken by the saved flag**); keypresses never modify config (config = init only)
+- Sort: `st`/`sn`/`sf`/`su` push sort level — **last pressed = highest priority** (front of array): `st` → `["time"]`, then `sf` → `["feed", "time"]`; keep only last 3 (oldest dropped); **uppercase `sT`/`sN`/`sF`/`sU` pushes the reversed level** (per-level direction); keypresses never modify config (config = init only)
 - Image toggle key: `gi` (was `g` — frees `g` for `gg` top)
 - `foldlevel` config — initial fold depth in nav pane (0 = all folded, large = all open)
 
@@ -143,5 +143,5 @@ Advanced functions: OPML mapping with nested categories, more keys (details TBD 
 | Nested categories | supported in tree | deep hierarchies | 2026-08 |
 | Vim keys | `gg`/`G`, `Ctrl+f/b`, `zt/zz/zb`, `{/}`, `[/]`; `/` modal search; `gi` image toggle | vim familiarity | 2026-08 |
 | Copy keys | `yy`/`yn`/`yf` | fast capture | 2026-08 |
-| Sort | `st/sn/sf/su` push levels, last pressed = highest (keep last 3); `S` reverse; `sort` config = init | N-level ordering | 2026-08 |
+| Sort | `st/sn/sf/su` push levels, last pressed = highest (keep last 3); `sT/sN/sF/sU` reversed per-level; `sort` config = init | N-level ordering | 2026-08 |
 | Foldlevel | `foldlevel` config, initial nav fold depth | open/closed default | 2026-08 |

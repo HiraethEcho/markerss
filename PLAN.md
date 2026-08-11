@@ -95,11 +95,13 @@ Tags & Favorites complete (rust). No per-item tags (decided).
 
 ### rust
 
-- [ ] Phase 1: Reading width ~80 cols, paragraph spacing, heading hierarchy
-- [ ] Phase 2: Element styling — lists, code blocks, inline code, blockquotes, tables, hr, links, images
-- [ ] Phase 3: Scroll (j/k, ctrl-u/d, n/p) + scrollbar + viewport culling + theme colors
-- [ ] Phase 4: Enhancement — images via kitty protocol, `g` toggle + `images` config, `[img]` fallback
-- [ ] Phase 5: Enhancement — link jump `f` + hints (1-9/letters) + open in browser
+- [x] Phase 1: Reading width ~80 cols (centered) + dynamic header height (summary fully visible)
+- [x] Phase 2: Element styling — via markdown Theme (headings/code/quote/list/table/hr) + theme file (named colors: h1/h2/h3/code/quote/link/accent/dim)
+- [x] Phase 3: Scroll (j/k, ctrl-u/d, ctrl-f/b) + scrollbar + scroll clamp + theme colors wired
+- [ ] Phase 4: Enhancement — images via kitty protocol, `g` toggle + `images` config, `[img]` fallback (deferred)
+- [ ] Phase 5: Enhancement — link jump `f` + hints + open in browser (deferred — `f` taken by favourite; renderer drops URLs)
+
+Article Polish core done (rust).
 
 ### go
 
@@ -120,9 +122,11 @@ Tags & Favorites complete (rust). No per-item tags (decided).
 ## advanced
 
 ### rust
-- [ ] Phase 1: OPML import — nested folders → `cat/subcat` categories, `category` attr → feed tags
-- [ ] Phase 2: OPML export — categories → nested folders, tags → `category` attr (round-trip)
-- [x] Phase 3: Vim keys — `gg`/`G`, `Ctrl+f/b`, `zt/zz/zb`, `{/}`, `[/]`, `/` modal search (n next), `gi` image toggle; copy `yy/yn/yf`; sort `st/sn/sf/su` push (last pressed = highest, keep last 3) + `s` reverse + `sort` config init; `foldlevel` + `sort` config
+- [x] Phase 1: OPML import — nested folders → `cat/subcat` categories, `category` attr → feed tags
+- [x] Phase 2: OPML export — categories → nested folders, tags → `category` attr (round-trip)
+- [x] Phase 3: Vim keys — `gg`/`G`, `Ctrl+f/b`, `/` modal search (live filter, enter keep / esc restore); copy `yy/yn/yf` (OSC52); sort `st/sn/sf/su` push + `sT/sN/sF/sU` reversed (keep 3, per-level) + `sort` config init; `foldlevel` config. (zt/zz/zb, {/}, [/], gi, link-jump: not bound — fold keys dropped per user; images/link-jump deferred)
+
+Advanced core done (rust) — search/sort/copy/jump.
 
 ### go
 - [ ] Phase 1: OPML import — nested folders → `cat/subcat` categories, `category` attr → feed tags

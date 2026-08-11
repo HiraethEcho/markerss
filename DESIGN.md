@@ -162,7 +162,7 @@ Directional movement: `h`/`q`/`esc` = LEFT, `l`/`enter` = RIGHT (+ arrow keys `�
 | Tab / Shift+Tab | global | focus next / prev pane |
 | ? | global | help (floating scrollable window) |
 
-Advanced keys (planned, unbound or remapped — see Advanced): `gg/G`, `Ctrl+f/b`, `zt/zz/zb`, `{/}`, `[/]`, `/` search, `yy/yn/yf`, `st/sn/sf/su`, `s` reverse, `gi` images.
+Advanced keys (planned, unbound or remapped — see Advanced): `gg/G`, `Ctrl+f/b`, `zt/zz/zb`, `{/}`, `[/]`, `/` search, `yy/yn/yf`, `st/sn/sf/su` (+`sT/sN/sF/sU` reversed), `gi` images.
 
 ### Decisions
 
@@ -323,12 +323,13 @@ Advanced keys (planned, unbound or remapped — see Advanced): `gg/G`, `Ctrl+f/b
 - `zt` / `zz` / `zb` — scroll cursor to top / center / bottom (article).
 - `{` / `}` — jump prev / next paragraph (blank line) (article).
 - `[` / `]` — jump prev / next section (article headings h2/h3 etc).
-- `/` — modal search in list pane; while active `n` = next match, `esc` exits; search owns `n` only in search mode.
+- `/` — modal search in list pane: live filter over title+summary; `enter` keeps the filter, `esc` restores the pre-search list.
 - `gi` — toggle kitty image render (was `g`; `g` freed for `gg` top).
 - `yy` / `yn` — copy item URL / title (list + article). `yf` — copy feed URL.
 - `st` / `sn` / `sf` / `su` — push a sort level (time / title / feed / unread-first). **Last pressed = highest priority** (front of array): `st` → `["time"]`, then `sf` → `["feed", "time"]`.
 - Keep only the last 3 presses — a 4th drops the oldest.
-- `s` — reverse the full ordering.
+- `sT`/`sN`/`sF`/`sU` — push the same level **reversed** (per-level direction: `sT` = time ascending).
+- `s` / `y` alone show their combo help in the status bar.
 - Keypresses affect in-memory sort only — **config file is never modified**; `sort` config array (max 3) = initial stack, applied left-to-right (first = highest priority).
 - `foldlevel` config — initial fold depth of nav Categories tree: `0` = all folded, `N` = levels 1..N open.
 - Folding applies to Categories tree (nested); flat sections (Tags, virtual nodes) unaffected.
