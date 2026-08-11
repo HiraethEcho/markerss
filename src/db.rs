@@ -59,14 +59,16 @@ impl Db {
         {
             let mut ins = tx.prepare(
                 "INSERT OR IGNORE INTO items
-                 (feed_url, guid, title, url, summary, content, date, read, read_later, saved)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, 0, 0)",
+                 (feed_url, guid, title, url, summary, content, date, read, read_later, saved, fetched_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, 0, 0, ?8)",
             )?;
             let mut upd = tx.prepare(
                 "UPDATE items SET title = ?3, url = ?4, summary = ?5, date = ?6,
-                        content = CASE WHEN content = '' THEN ?7 ELSE content END
+                        content = CASE WHEN content = '' THEN ?7 ELSE content END,
+                        fetched_at = CASE WHEN content = '' THEN ?8 ELSE fetched_at END
                  WHERE feed_url = ?1 AND guid = ?2",
             )?;
+            let now = chrono::Utc::now().to_rfc3339();
             for i in items {
                 let n = ins.execute(rusqlite::params![
                     feed_url,
@@ -75,12 +77,15 @@ impl Db {
                     i.url,
                     i.summary,
                     i.content,
-                    i.date
+                    i.date,
+                    now,
                 ])?;
                 if n > 0 {
                     added.push(i.guid.clone());
                 }
-                upd.execute(rusqlite::params![feed_url, i.guid, i.title, i.url, i.summary, i.date, i.content])?;
+                upd.execute(rusqlite::params![
+                    feed_url, i.guid, i.title, i.url, i.summary, i.date, i.content, now
+                ])?;
             }
         }
         tx.commit()?;
@@ -98,11 +103,12 @@ impl Db {
             // capture existing read flags + fetched content BEFORE deleting
             let mut read_guids: std::collections::HashSet<String> = Default::default();
             let mut content_map: std::collections::HashMap<String, String> = Default::default();
+            let mut fetched_map: std::collections::HashMap<String, String> = Default::default();
             let mut later_map: std::collections::HashSet<String> = Default::default();
             let mut saved_map: std::collections::HashSet<String> = Default::default();
             {
                 let mut q = tx.prepare(
-                    "SELECT guid, read, content, read_later, saved FROM items WHERE feed_url = ?1",
+                    "SELECT guid, read, content, read_later, saved, fetched_at FROM items WHERE feed_url = ?1",
                 )?;
                 let rows = q.query_map([feed_url], |r| {
                     Ok((
@@ -111,6 +117,7 @@ impl Db {
                         r.get::<_, String>(2)?,
                         r.get::<_, i64>(3)?,
                         r.get::<_, i64>(4)?,
+                        r.get::<_, String>(5)?,
                     ))
                 })?;
                 for row in rows.flatten() {
@@ -119,6 +126,7 @@ impl Db {
                     }
                     if !row.2.is_empty() {
                         content_map.insert(row.0.clone(), row.2);
+                        fetched_map.insert(row.0.clone(), row.5);
                     }
                     if row.3 != 0 {
                         later_map.insert(row.0.clone());
@@ -130,10 +138,11 @@ impl Db {
             }
             let mut del = tx.prepare("DELETE FROM items WHERE feed_url = ?1")?;
             del.execute([feed_url])?;
+            let now = chrono::Utc::now().to_rfc3339();
             let mut ins = tx.prepare(
                 "INSERT OR REPLACE INTO items
-                 (feed_url, guid, title, url, summary, content, date, read, read_later, saved)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                 (feed_url, guid, title, url, summary, content, date, read, read_later, saved, fetched_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             )?;
             for i in items {
                 let read = if read_guids.contains(&i.guid) { 1 } else { 0 };
@@ -144,6 +153,11 @@ impl Db {
                     .get(&i.guid)
                     .cloned()
                     .unwrap_or_else(|| i.content.clone());
+                let fetched_at = if content_map.contains_key(&i.guid) {
+                    fetched_map.get(&i.guid).cloned().unwrap_or_else(|| now.clone())
+                } else {
+                    now.clone()
+                };
                 ins.execute(rusqlite::params![
                     feed_url,
                     i.guid,
@@ -154,7 +168,8 @@ impl Db {
                     i.date,
                     read,
                     later,
-                    saved
+                    saved,
+                    fetched_at,
                 ])?;
             }
         }
@@ -164,8 +179,8 @@ impl Db {
     /// Update an item's content (fetched full article) — preserves read flag.
     pub fn update_item_content(&mut self, feed_url: &str, guid: &str, content: &str) -> rusqlite::Result<()> {
         self.conn.execute(
-            "UPDATE items SET content = ?3 WHERE feed_url = ?1 AND guid = ?2",
-            rusqlite::params![feed_url, guid, content],
+            "UPDATE items SET content = ?3, fetched_at = ?4 WHERE feed_url = ?1 AND guid = ?2",
+            rusqlite::params![feed_url, guid, content, chrono::Utc::now().to_rfc3339()],
         )?;
         Ok(())
     }
@@ -458,5 +473,27 @@ mod upsert_tests {
         assert_eq!(a2.content, "<p>content</p>"); // content preserved
         let b = items.iter().find(|i| i.guid == "b").unwrap();
         assert!(!d.is_read("f", "b").unwrap()); // new item unread
+    }
+
+    #[test]
+    fn ttl_purge_clears_only_old_non_saved_content() {
+        let mut d = db();
+        d.replace_feed_items_preserving_read("f", &[item("a", "A")]).unwrap();
+        d.update_item_content("f", "a", "<p>fresh</p>").unwrap();
+        d.upsert_fetch("f", &[item("b", "B")]).unwrap();
+        d.update_item_content("f", "b", "<p>old</p>").unwrap();
+        // age b's content beyond the TTL by backdating fetched_at
+        let old = (chrono::Utc::now() - chrono::Duration::days(99)).to_rfc3339();
+        d.conn.execute("UPDATE items SET fetched_at = ?1 WHERE guid = 'b'", [old]).unwrap();
+        // saved items are exempt
+        d.set_flag("f", "a", "saved", true).unwrap();
+        d.cleanup_content(30).unwrap();
+        let items = d.items_for_feed("f").unwrap();
+        let a = items.iter().find(|i| i.guid == "a").unwrap();
+        let b = items.iter().find(|i| i.guid == "b").unwrap();
+        assert_eq!(a.content, "<p>fresh</p>"); // saved + fresh → kept
+        assert_eq!(b.content, ""); // old non-saved → purged
+        // item rows stay; only content is cleared
+        assert_eq!(items.len(), 2);
     }
 }
