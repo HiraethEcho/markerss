@@ -122,7 +122,7 @@ Tags & Favorites complete (rust). No per-item tags (decided).
 ### rust
 - [ ] Phase 1: OPML import — nested folders → `cat/subcat` categories, `category` attr → feed tags
 - [ ] Phase 2: OPML export — categories → nested folders, tags → `category` attr (round-trip)
-- [ ] Phase 3: Vim keys — `gg`/`G`, `Ctrl+f/b`, `zt/zz/zb`, `{/}`, `[/]`, `/` modal search (n next), `gi` image toggle; copy `yy/yn/yf`; sort `st/sn/sf/su` push (last pressed = highest, keep last 3) + `S` reverse + `sort` config init; `foldlevel` + `sort` config
+- [x] Phase 3: Vim keys — `gg`/`G`, `Ctrl+f/b`, `zt/zz/zb`, `{/}`, `[/]`, `/` modal search (n next), `gi` image toggle; copy `yy/yn/yf`; sort `st/sn/sf/su` push (last pressed = highest, keep last 3) + `s` reverse + `sort` config init; `foldlevel` + `sort` config
 
 ### go
 - [ ] Phase 1: OPML import — nested folders → `cat/subcat` categories, `category` attr → feed tags

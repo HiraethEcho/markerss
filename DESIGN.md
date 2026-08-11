@@ -328,7 +328,7 @@ Advanced keys (planned, unbound or remapped — see Advanced): `gg/G`, `Ctrl+f/b
 - `yy` / `yn` — copy item URL / title (list + article). `yf` — copy feed URL.
 - `st` / `sn` / `sf` / `su` — push a sort level (time / title / feed / unread-first). **Last pressed = highest priority** (front of array): `st` → `["time"]`, then `sf` → `["feed", "time"]`.
 - Keep only the last 3 presses — a 4th drops the oldest.
-- `S` — reverse the full ordering.
+- `s` — reverse the full ordering.
 - Keypresses affect in-memory sort only — **config file is never modified**; `sort` config array (max 3) = initial stack, applied left-to-right (first = highest priority).
 - `foldlevel` config — initial fold depth of nav Categories tree: `0` = all folded, `N` = levels 1..N open.
 - Folding applies to Categories tree (nested); flat sections (Tags, virtual nodes) unaffected.
