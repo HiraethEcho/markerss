@@ -512,11 +512,12 @@ impl App {
         self.fetching = true;
         self.status = format!("fetching {}", item.url);
         let timeout = self.cfg.fetch_timeout;
+        let proxy = self.cfg.proxy.clone();
         let tx = self.tx.clone();
         let url = item.url.clone();
         let guid = item.guid.clone();
         thread::spawn(move || {
-            let result = fetch::fetch_article(&url, timeout);
+            let result = fetch::fetch_article(&url, timeout, proxy.as_deref());
             tx.send(Msg::ArticleFetched { url, guid, result }).ok();
         });
     }
@@ -751,9 +752,10 @@ impl App {
     fn refresh_feed_thread(&mut self, url: String, full: bool) {
         self.pending_refreshes += 1;
         let timeout = self.cfg.fetch_timeout;
+        let proxy = self.cfg.proxy.clone();
         let tx = self.tx.clone();
         thread::spawn(move || {
-            let result = fetch::refresh_feed(&url, timeout);
+            let result = fetch::refresh_feed(&url, timeout, proxy.as_deref());
             tx.send(Msg::FeedRefreshed { url, result, full }).ok();
         });
     }
