@@ -20,6 +20,8 @@ impl Db {
             std::fs::create_dir_all(dir).ok();
         }
         let conn = Connection::open(path)?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS items (
                 feed_url TEXT NOT NULL,
@@ -48,6 +50,11 @@ impl Db {
                 conn.execute(&format!("ALTER TABLE items ADD COLUMN {col} {def}"), [])?;
             }
         }
+        // flag indexes after migration (old DBs lack the columns)
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_items_later ON items(read_later);
+             CREATE INDEX IF NOT EXISTS idx_items_saved ON items(saved);",
+        )?;
         Ok(Db { conn })
     }
 
