@@ -25,7 +25,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use model::Item;
 
 use crate::config::{Config, ThemeColors};
@@ -116,6 +116,7 @@ struct App {
     pending_y: bool,
     sort_stack: Vec<(String, bool)>,
     search_base: Option<Vec<(String, Item)>>,
+    keymap: std::collections::HashMap<KeyCode, crate::keys::Action>,
     input: Option<InputPrompt>,
     add_pending: Option<String>,
     add_pending_title: Option<String>,
@@ -149,6 +150,7 @@ impl App {
         let theme = ThemeColors::load(cfg.theme_path.as_ref());
         let sort_stack: Vec<(String, bool)> =
             cfg.sort.iter().map(|s| (s.clone(), false)).collect();
+        let keymap = crate::keys::build_keymap(&cfg.keybindings);
         let mut app = App {
             cfg,
             theme,
@@ -180,6 +182,7 @@ impl App {
             pending_y: false,
             sort_stack,
             search_base: None,
+            keymap,
             input: None,
             add_pending: None,
             add_pending_title: None,

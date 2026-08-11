@@ -6,7 +6,170 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use crate::clipboard::copy_to_clipboard;
 use crate::{App, InputMode, TreeRow};
 
+/// Keybinding actions — user-remappable single-key actions.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Action {
+    Open,
+    Back,
+    Quit,
+    Refresh,
+    RefreshAll,
+    ToggleRead,
+    MarkAllRead,
+    Export,
+    Browser,
+    Favourite,
+    ReadLater,
+    Saved,
+    NewFeed,
+    Delete,
+    Rename,
+    EditTags,
+    Help,
+    FocusNext,
+    Search,
+    JumpTop,
+    JumpBottom,
+    NextUnread,
+    PrevUnread,
+}
+
+impl Action {
+    /// Parse a config action name → Action.
+    pub(crate) fn from_str(s: &str) -> Option<Action> {
+        Some(match s.trim() {
+            "open" => Action::Open,
+            "back" => Action::Back,
+            "quit" => Action::Quit,
+            "refresh" => Action::Refresh,
+            "refresh_all" => Action::RefreshAll,
+            "toggle_read" => Action::ToggleRead,
+            "mark_all_read" => Action::MarkAllRead,
+            "export" => Action::Export,
+            "browser" => Action::Browser,
+            "favourite" => Action::Favourite,
+            "read_later" => Action::ReadLater,
+            "saved" => Action::Saved,
+            "new_feed" => Action::NewFeed,
+            "delete" => Action::Delete,
+            "rename" => Action::Rename,
+            "edit_tags" => Action::EditTags,
+            "help" => Action::Help,
+            "focus_next" => Action::FocusNext,
+            "search" => Action::Search,
+            "jump_top" => Action::JumpTop,
+            "jump_bottom" => Action::JumpBottom,
+            "next_unread" => Action::NextUnread,
+            "prev_unread" => Action::PrevUnread,
+            _ => return None,
+        })
+    }
+
+    /// Parse a key string → KeyCode ("l", "enter", "esc", "tab", "?", …).
+    pub(crate) fn parse_key(s: &str) -> Option<KeyCode> {
+        Some(match s.trim().to_ascii_lowercase().as_str() {
+            "enter" => KeyCode::Enter,
+            "esc" => KeyCode::Esc,
+            "tab" => KeyCode::Tab,
+            "backtab" => KeyCode::BackTab,
+            "up" => KeyCode::Up,
+            "down" => KeyCode::Down,
+            "left" => KeyCode::Left,
+            "right" => KeyCode::Right,
+            "space" => KeyCode::Char(' '),
+            other if other.chars().count() == 1 => {
+                KeyCode::Char(other.chars().next().unwrap())
+            }
+            _ => return None,
+        })
+    }
+}
+
+/// Build the user keymap: key → action (invalid entries skipped).
+pub(crate) fn build_keymap(
+    raw: &std::collections::HashMap<String, String>,
+) -> std::collections::HashMap<KeyCode, Action> {
+    let mut map = std::collections::HashMap::new();
+    for (action, key) in raw {
+        if let (Some(a), Some(k)) = (Action::from_str(action), Action::parse_key(key)) {
+            map.insert(k, a);
+        }
+    }
+    map
+}
+
 impl App {
+    /// Execute a remapped action (user keybindings). Guards per pane.
+    fn execute_action(&mut self, action: Action) {
+        match action {
+            Action::Open => self.go_right(),
+            Action::Back => self.go_left(),
+            Action::Quit => self.running = false,
+            Action::Refresh => self.refresh_all(false),
+            Action::RefreshAll => self.refresh_all(true),
+            Action::ToggleRead => self.toggle_read(),
+            Action::MarkAllRead => self.mark_all_read(),
+            Action::Export => self.start_export(),
+            Action::Browser => self.open_browser(),
+            Action::Favourite if self.focus == 0 => self.toggle_favourite_feed(),
+            Action::ReadLater if self.focus >= 1 => self.toggle_item_flag("read_later"),
+            Action::Saved if self.focus >= 1 => self.toggle_item_flag("saved"),
+            Action::NewFeed if self.focus == 0 => self.start_input(InputMode::AddUrl),
+            Action::Delete if self.focus == 0 => {
+                if self.delete_armed {
+                    self.delete_armed = false;
+                    self.delete_selected_feed();
+                } else {
+                    self.delete_armed = true;
+                }
+            }
+            Action::Rename if self.focus == 0 => {
+                match self.tree_rows.get(self.tree_sel) {
+                    Some(TreeRow::Category(_)) => self.start_input(InputMode::RenameCategory),
+                    Some(TreeRow::Tag(_)) => self.start_input(InputMode::EditTag),
+                    Some(TreeRow::Feed(url, _, _)) => {
+                        self.edit_tags_url = Some(url.clone());
+                        self.start_input(InputMode::EditFeedTitle);
+                    }
+                    _ => {}
+                }
+            }
+            Action::EditTags if self.focus == 0 => {
+                if let Some(TreeRow::Feed(url, _, _)) = self.tree_rows.get(self.tree_sel).cloned() {
+                    self.edit_tags_url = Some(url);
+                    self.start_input(InputMode::EditTags);
+                }
+            }
+            Action::Help => self.show_help = true,
+            Action::FocusNext => self.focus = (self.focus + 1) % 3,
+            Action::Search if self.focus == 1 => {
+                self.search_base = Some(self.scoped_items.clone());
+                self.start_input(InputMode::Search);
+            }
+            Action::JumpTop => match self.focus {
+                0 => self.tree_sel = 0,
+                1 => {
+                    self.list_sel = 0;
+                    self.article_scroll = 0;
+                }
+                2 => self.article_scroll = 0,
+                _ => {}
+            },
+            Action::JumpBottom => match self.focus {
+                0 => self.tree_sel = self.tree_rows.len().saturating_sub(1),
+                1 => {
+                    self.list_sel = self.scoped_items.len().saturating_sub(1);
+                    self.article_scroll = 0;
+                }
+                2 => self.article_scroll = u16::MAX,
+                _ => {}
+            },
+            Action::NextUnread => self.mark_read_and_jump(1),
+            Action::PrevUnread => self.mark_read_and_jump(-1),
+            _ => {}
+        }
+    }
+
     pub(crate) fn on_key(&mut self, key: KeyCode, mods: KeyModifiers) {
         if self.show_help {
             match key {
@@ -54,6 +217,11 @@ impl App {
                     self.input = Some(prompt);
                 }
             }
+            return;
+        }
+        // user keybindings: remapped key → action (defaults still work)
+        if let Some(&action) = self.keymap.get(&key) {
+            self.execute_action(action);
             return;
         }
         // ctrl+u / ctrl+d half-page (article); ctrl+f/b full page (list+article)
@@ -642,5 +810,36 @@ impl App {
             }
             ord
         });
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_actions() {
+        assert_eq!(Action::from_str("open"), Some(Action::Open));
+        assert_eq!(Action::from_str("refresh_all"), Some(Action::RefreshAll));
+        assert_eq!(Action::from_str("bogus"), None);
+    }
+
+    #[test]
+    fn parse_keys() {
+        assert_eq!(Action::parse_key("l"), Some(KeyCode::Char('l')));
+        assert_eq!(Action::parse_key("L"), Some(KeyCode::Char('l')));
+        assert_eq!(Action::parse_key("enter"), Some(KeyCode::Enter));
+        assert_eq!(Action::parse_key("esc"), Some(KeyCode::Esc));
+        assert_eq!(Action::parse_key("??"), None);
+    }
+
+    #[test]
+    fn keymap_skips_invalid() {
+        let mut raw = std::collections::HashMap::new();
+        raw.insert("open".to_string(), "o".to_string());
+        raw.insert("bogus".to_string(), "x".to_string());
+        raw.insert("help".to_string(), "??".to_string());
+        let m = build_keymap(&raw);
+        assert_eq!(m.len(), 1);
+        assert_eq!(m.get(&KeyCode::Char('o')), Some(&Action::Open));
     }
 }
