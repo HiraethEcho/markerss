@@ -48,6 +48,8 @@ Top entries and their fold behavior:
 Tree behavior:
 - **All top entries highlighted** (distinct fg + bold).
 - Indentation: categories 2 spaces, feeds 4 spaces under a category/tag, 2 spaces under Feeds/Favourite/No Category.
+- **Counts are unread counts** on every node (feed / category / tag / Favourite / No Category / virtual nodes).
+- **Feed health**: a feed whose last fetch failed shows a `!` marker on its nav row (cleared on next successful fetch).
 - **Left (`h`/`q`/`esc`) cascade**: expanded header → fold it; folded header → fold its parent; a top-level folded entry stays (never jumps to Unread); a feed row folds its containing container (category → tag → section).
 - **Right (`l`/`enter`)**: folded entry → expand and **jump the cursor to its first child**; expanded/leaf entry → descend to the list pane.
 - Article pane split: header (meta + summary) + content. **List mode (focus in list) shows summary only**; article mode shows the RSS body (blank when the feed has none).
@@ -87,7 +89,7 @@ Directional movement: `h`/`q`/`esc` = LEFT, `l`/`enter` = RIGHT (+ arrow keys `�
 
 ### Storage
 
-- SQLite database at `$XDG_CACHE_HOME/markerss/markerss.db` — items + content + flags.
+- SQLite database at `$XDG_CACHE_HOME/markerss/markerss.db` — items + content + flags; WAL journal + `(feed_url, read)` / `(read_later)` / `(saved)` indexes.
 - Items keyed `(feed_url, guid)`; flags and content preserved across refresh.
 - Per-item boolean flags: `read`, `read_later`, `saved` — independent. **Favourite is feed-level** (stored in the urls file as `!favourite` marker, not in the DB).
 - **Feed-provided content is kept on refresh** (arrives with the feed — no extra request); full-article fetch (readability) may replace it.
@@ -199,7 +201,7 @@ Advanced keys (planned, unbound or remapped — see Advanced): `gg/G`, `Ctrl+f/b
   - `fetch_timeout` — per-request timeout.
   - `max_items_per_feed` — cap items kept per feed.
   - `proxy` — HTTP proxy.
-  - `keybindings` — custom keymap.
+  - `keybindings` — map of `"action" = "key"` (single-key remaps run in addition to defaults, never intercepting ctrl chords): `open back quit refresh refresh_all toggle_read mark_all_read export browser favourite read_later saved new_feed delete rename edit_tags help focus_next search jump_top jump_bottom next_unread prev_unread`.
   - `default_view` — startup scope, e.g. `Feed:<url>` / `Category:<name>`.
 - Read at startup; defaults + XDG fallbacks when keys absent. No hot-reload in MVP.
 
@@ -323,7 +325,7 @@ Advanced keys (planned, unbound or remapped — see Advanced): `gg/G`, `Ctrl+f/b
 - `zt` / `zz` / `zb` — scroll cursor to top / center / bottom (article).
 - `{` / `}` — jump prev / next paragraph (blank line) (article).
 - `[` / `]` — jump prev / next section (article headings h2/h3 etc).
-- `/` — modal search in list pane: live filter over title+summary; `enter` keeps the filter, `esc` restores the pre-search list.
+- `/` — modal search in list pane: live filter over title+summary; `enter` keeps the filter active (new appends still re-filter), `esc` or **left (`h`/`q`/`esc`) stops it** — the pre-search list is restored (first left cancels search and stays in the list; a second left goes back to nav).
 - `gi` — toggle kitty image render (was `g`; `g` freed for `gg` top).
 - `yy` / `yn` — copy item URL / title (list + article). `yf` — copy feed URL.
 - `st` / `sn` / `sf` / `su` — push a sort level (time / title / feed / unread-first). **Last pressed = highest priority** (front of array): `st` → `["time"]`, then `sf` → `["feed", "time"]`.

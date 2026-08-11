@@ -53,8 +53,9 @@ User-configurable app settings via a config file.
 - Config file at `$XDG_CONFIG_HOME/markerss/config.toml`, separate from `urls` subscriptions file
 - Format: JSON, JSONC, TOML, or YAML — detected by extension (`.json`/`.jsonc`/`.toml`/`.yaml`/`.yml`); `config.toml` (TOML) is the default
 - Keys: `cache_ttl_days` (startup purge), `export_dir` (export location), `pane_ratio` (three-pane widths, e.g. 0.15/0.15/0.7), `theme` (standalone color file), `browser` (which browser to open), `refresh` (auto-on-startup on/off, interval), `nav_presets` (list of nav section arrays, e.g. `[["Unread", "Feeds"], ["Unread", "Later"]]`), `images` (kitty image render on/off), `foldlevel` (initial nav fold depth, default open), `sort` (initial sort stack, ordered array max 3, e.g. `["unread", "time"]`; keypresses never modify config)
-- Optional: `fetch_timeout`, `max_items_per_feed`, `proxy`, `keybindings`, `default_view`
+- Optional: `fetch_timeout`, `max_items_per_feed`, `proxy`, `default_view`; `keybindings` — map of action→key (open/back/quit/refresh/refresh_all/toggle_read/mark_all_read/export/browser/favourite/read_later/saved/new_feed/delete/rename/edit_tags/help/focus_next/search/jump_top/jump_bottom/next_unread/prev_unread)
 - Nav pane: multiple layout presets, each preset = array of sections; one default full preset (Unread/Read Later/Favourite/Categories/Tags/Saved); `nav_presets` replaces the list (first = initial); `t` cycles presets (wrap)
+- Counts: every nav node shows its unread count; failed fetches mark the feed row with `!` until the next success
 - Defaults when keys absent; XDG fallbacks per spec
 - Read at startup; changes require restart (no hot-reload in MVP)
 
