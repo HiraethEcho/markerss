@@ -4,6 +4,7 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 
 use crate::clipboard::copy_to_clipboard;
+use crate::ui::hint_index;
 use crate::{App, InputMode, TreeRow};
 
 /// Keybinding actions — user-remappable single-key actions.
@@ -32,6 +33,7 @@ pub(crate) enum Action {
     JumpBottom,
     NextUnread,
     PrevUnread,
+    LinkJump,
 }
 
 impl Action {
@@ -61,6 +63,7 @@ impl Action {
             "jump_bottom" => Action::JumpBottom,
             "next_unread" => Action::NextUnread,
             "prev_unread" => Action::PrevUnread,
+            "link_jump" => Action::LinkJump,
             _ => return None,
         })
     }
@@ -99,6 +102,14 @@ pub(crate) fn build_keymap(
 }
 
 impl App {
+    /// Reset prefix-key and delete-armed state (help/input/ctrl paths return early).
+    fn clear_pending(&mut self) {
+        self.pending_g = false;
+        self.pending_s = false;
+        self.pending_y = false;
+        self.delete_armed = false;
+    }
+
     /// Execute a remapped action (user keybindings). Guards per pane.
     fn execute_action(&mut self, action: Action) {
         match action {
@@ -153,6 +164,8 @@ impl App {
             Action::FocusNext => self.focus = (self.focus + 1) % 3,
             Action::Search if self.focus == 1 => {
                 self.search_base = Some(self.scoped_items.clone());
+                self.search_active = true;
+                self.search_query.clear();
                 self.start_input(InputMode::Search);
             }
             Action::JumpTop => match self.focus {
@@ -175,6 +188,10 @@ impl App {
             },
             Action::NextUnread => self.mark_read_and_jump(1),
             Action::PrevUnread => self.mark_read_and_jump(-1),
+            Action::LinkJump if self.focus == 2 => {
+                self.link_mode = true;
+                self.status = "link jump: press a hint key (1-9, a-z) · esc/h/q to cancel".into();
+            }
             _ => {}
         }
     }
@@ -189,6 +206,7 @@ impl App {
                 }
                 _ => {}
             }
+            self.clear_pending();
             return;
         }
         if let Some(mut prompt) = self.input.take() {
@@ -200,8 +218,8 @@ impl App {
                     }
                 }
                 KeyCode::Enter if search_mode => {
-                    // keep the filter, close the input box
-                    self.search_base = None;
+                    // keep the filter active (left stops it); keep the base
+                    // snapshot so left can restore the full list
                 }
                 KeyCode::Enter => {
                     self.input = Some(prompt);
@@ -226,12 +244,39 @@ impl App {
                     self.input = Some(prompt);
                 }
             }
+            self.clear_pending();
             return;
         }
-        // user keybindings: remapped key → action (defaults still work)
-        if let Some(&action) = self.keymap.get(&key) {
-            self.execute_action(action);
+        // link-jump mode: a hint key opens the link; esc/h/q cancels
+        if self.link_mode {
+            match key {
+                KeyCode::Char(c) if hint_index(c).is_some() => {
+                    if let Some((_, url)) = self
+                        .link_hints
+                        .get(hint_index(c).unwrap())
+                        .cloned()
+                    {
+                        self.open_url(&url);
+                    } else {
+                        self.status = "no link for that hint".into();
+                    }
+                    self.link_mode = false;
+                }
+                KeyCode::Esc | KeyCode::Char('h') | KeyCode::Char('q') => {
+                    self.link_mode = false;
+                }
+                _ => {}
+            }
             return;
+        }
+        // user keybindings: remapped key → action (defaults still work);
+        // never intercept ctrl chords (ctrl+u/d/f/b keep their meaning)
+        if !mods.contains(KeyModifiers::CONTROL) {
+            if let Some(&action) = self.keymap.get(&key) {
+                self.clear_pending();
+                self.execute_action(action);
+                return;
+            }
         }
         // ctrl+u / ctrl+d half-page (article); ctrl+f/b full page (list+article)
         if mods.contains(KeyModifiers::CONTROL) {
@@ -243,6 +288,7 @@ impl App {
                 _ if self.focus == 2 => self.article_scroll_ctrl(key),
                 _ => {}
             }
+            self.clear_pending();
             return;
         }
         if key != KeyCode::Char('d') {
@@ -329,6 +375,7 @@ impl App {
                 self.fullscreen = !self.fullscreen;
             }
             KeyCode::Char('f') if self.focus == 0 => self.execute_action(Action::Favourite),
+            KeyCode::Char('f') if self.focus == 2 => self.execute_action(Action::LinkJump),
             KeyCode::Char('?') => self.execute_action(Action::Help),
             // / — modal list search (live filter; enter keeps, esc restores)
             KeyCode::Char('/') if self.focus == 1 => self.execute_action(Action::Search),
@@ -431,6 +478,11 @@ impl App {
 
     /// Left: article→list→nav→parent in file tree.
     fn go_left(&mut self) {
+        // an active search is stopped by left; list stays until next left
+        if self.focus == 1 && self.search_active {
+            self.cancel_search();
+            return;
+        }
         match self.focus {
             2 => {
                 if self.fullscreen {
@@ -713,7 +765,8 @@ impl App {
     }
 
     /// Apply the current search query to the snapshot taken when `/` opened.
-    fn apply_search_filter(&mut self, q: &str) {
+    pub(crate) fn apply_search_filter(&mut self, q: &str) {
+        self.search_query = q.to_string();
         let Some(base) = &self.search_base else { return };
         let q = q.trim().to_lowercase();
         if q.is_empty() {
@@ -732,10 +785,24 @@ impl App {
         self.article_scroll = 0;
     }
 
+    /// Re-run the active search filter after list mutations (append/rebuild).
+    pub(crate) fn reapply_search_filter(&mut self) {
+        if self.search_active {
+            let q = self.search_query.clone();
+            self.apply_search_filter(&q);
+        }
+    }
+
     /// Esc from the search box — restore the pre-search list.
     fn cancel_search(&mut self) {
+        self.search_active = false;
+        self.search_query.clear();
         if let Some(base) = self.search_base.take() {
             self.scoped_items = base;
+        } else {
+            // snapshot already dropped (enter kept the filter) — rebuild the
+            // full scope list from scratch (active is false, so no re-filter)
+            self.rebuild_list();
         }
         self.list_sel = 0;
     }

@@ -9,21 +9,37 @@ use crate::model::Item;
 
 const USER_AGENT: &str = concat!("markerss/", env!("CARGO_PKG_VERSION"));
 
-pub fn http(timeout_secs: u64) -> reqwest::blocking::Client {
+pub fn http(timeout_secs: u64, proxy: Option<&str>) -> reqwest::blocking::Client {
     let mut b = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(timeout_secs.max(1)))
         .user_agent(USER_AGENT);
-    if let Ok(proxy) = std::env::var("MARKERSS_PROXY") {
-        if let Ok(p) = reqwest::Proxy::all(&proxy) {
+    let proxy: Option<String> = proxy
+        .filter(|p| !p.is_empty())
+        .map(String::from)
+        .or_else(|| std::env::var("MARKERSS_PROXY").ok().filter(|p| !p.is_empty()));
+    if let Some(p) = proxy {
+        if let Ok(p) = reqwest::Proxy::all(p) {
             b = b.proxy(p);
         }
     }
     b.build().expect("http client")
 }
 
+/// Fetch raw bytes (images); used by the TUI image pipeline.
+pub fn fetch_raw(url: &str, timeout_secs: u64, proxy: Option<&str>) -> Result<Vec<u8>, String> {
+    let resp = http(timeout_secs, proxy)
+        .get(url)
+        .send()
+        .map_err(|e| format!("GET {url}: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("GET {url}: HTTP {}", resp.status()));
+    }
+    resp.bytes().map(|b| b.to_vec()).map_err(|e| format!("{url}: {e}"))
+}
+
 /// Refresh one feed; returns items sorted newest-first.
-pub fn refresh_feed(url: &str, timeout_secs: u64) -> Result<Vec<Item>, String> {
-    let resp = http(timeout_secs)
+pub fn refresh_feed(url: &str, timeout_secs: u64, proxy: Option<&str>) -> Result<Vec<Item>, String> {
+    let resp = http(timeout_secs, proxy)
         .get(url)
         .send()
         .map_err(|e| format!("GET {url}: {e}"))?;
@@ -80,13 +96,13 @@ pub fn refresh_feed(url: &str, timeout_secs: u64) -> Result<Vec<Item>, String> {
 
 /// Fetch full article, extract main content (Mozilla Readability via
 /// dom_smoothie). Returns article HTML; falls back to the whole page.
-pub fn fetch_article(url: &str, timeout_secs: u64) -> Result<String, String> {
-    let html = fetch_html(url, timeout_secs)?;
+pub fn fetch_article(url: &str, timeout_secs: u64, proxy: Option<&str>) -> Result<String, String> {
+    let html = fetch_html(url, timeout_secs, proxy)?;
     Ok(extract_main(url, &html))
 }
 
-fn fetch_html(url: &str, timeout_secs: u64) -> Result<String, String> {
-    let resp = http(timeout_secs)
+fn fetch_html(url: &str, timeout_secs: u64, proxy: Option<&str>) -> Result<String, String> {
+    let resp = http(timeout_secs, proxy)
         .get(url)
         .send()
         .map_err(|e| format!("GET {url}: {e}"))?;

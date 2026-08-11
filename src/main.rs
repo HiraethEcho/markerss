@@ -41,6 +41,7 @@ enum Msg {
         full: bool,
     },
     ArticleFetched { url: String, guid: String, result: Result<String, String> },
+    ImageLoaded { url: String, data: Result<Vec<u8>, String> },
     RefreshTick,
 }
 
@@ -75,6 +76,16 @@ enum Scope {
     Category(String),
     Feed(String),
     Tag(String),
+}
+
+/// TUI image state: protocol picker + decoded cache + per-image protocols.
+#[derive(Default)]
+struct Images {
+    picker: Option<ratatui_image::picker::Picker>,
+    cache: std::collections::HashMap<String, image::DynamicImage>,
+    protocols: std::collections::HashMap<String, ratatui_image::protocol::Protocol>,
+    pending: std::collections::HashSet<String>,
+    failed: std::collections::HashSet<String>,
 }
 
 struct App {
@@ -116,8 +127,14 @@ struct App {
     pending_y: bool,
     sort_stack: Vec<(String, bool)>,
     search_base: Option<Vec<(String, Item)>>,
+    search_active: bool,
+    search_query: String,
     keymap: std::collections::HashMap<KeyCode, crate::keys::Action>,
     feed_errors: std::collections::HashMap<String, String>,
+    link_mode: bool,
+    link_hints: Vec<(String, String)>,
+    render_images: Vec<String>,
+    images: Images,
     input: Option<InputPrompt>,
     add_pending: Option<String>,
     add_pending_title: Option<String>,
@@ -183,8 +200,14 @@ impl App {
             pending_y: false,
             sort_stack,
             search_base: None,
+            search_active: false,
+            search_query: String::new(),
             keymap,
             feed_errors: std::collections::HashMap::new(),
+            link_mode: false,
+            link_hints: Vec::new(),
+            render_images: Vec::new(),
+            images: Images::default(),
             input: None,
             add_pending: None,
             add_pending_title: None,
@@ -332,6 +355,18 @@ impl App {
         }
     }
 
+    /// Drop any active search when the scope changes (its base snapshot is stale).
+    fn clear_search(&mut self) {
+        self.search_base = None;
+        self.search_active = false;
+        self.search_query.clear();
+        if let Some(p) = &self.input {
+            if p.mode == InputMode::Search {
+                self.input = None;
+            }
+        }
+    }
+
     fn select_scope(&mut self, row: &TreeRow) {
         if matches!(row, TreeRow::Section(_)) {
             return;
@@ -349,6 +384,7 @@ impl App {
             TreeRow::Favourite | TreeRow::Uncategorized => Scope::AllUnread,
         };
         self.list_sel = 0;
+        self.clear_search();
         self.rebuild_list();
         self.focus = 1;
     }
@@ -427,6 +463,7 @@ impl App {
         self.scoped_items = items;
         // explicit sort stack (st/sn/sf/su) re-orders the snapshot on demand
         self.apply_sort();
+        self.reapply_search_filter();
         if self.list_sel >= self.scoped_items.len() {
             self.list_sel = self.scoped_items.len().saturating_sub(1);
         }
@@ -494,11 +531,12 @@ impl App {
         self.fetching = true;
         self.status = format!("fetching {}", item.url);
         let timeout = self.cfg.fetch_timeout;
+        let proxy = self.cfg.proxy.clone();
         let tx = self.tx.clone();
         let url = item.url.clone();
         let guid = item.guid.clone();
         thread::spawn(move || {
-            let result = fetch::fetch_article(&url, timeout);
+            let result = fetch::fetch_article(&url, timeout, proxy.as_deref());
             tx.send(Msg::ArticleFetched { url, guid, result }).ok();
         });
     }
@@ -733,9 +771,10 @@ impl App {
     fn refresh_feed_thread(&mut self, url: String, full: bool) {
         self.pending_refreshes += 1;
         let timeout = self.cfg.fetch_timeout;
+        let proxy = self.cfg.proxy.clone();
         let tx = self.tx.clone();
         thread::spawn(move || {
-            let result = fetch::refresh_feed(&url, timeout);
+            let result = fetch::refresh_feed(&url, timeout, proxy.as_deref());
             tx.send(Msg::FeedRefreshed { url, result, full }).ok();
         });
     }
@@ -887,6 +926,7 @@ impl App {
         if !fresh.is_empty() {
             self.scoped_items.splice(0..0, fresh);
         }
+        self.reapply_search_filter();
     }
 
     fn handle_article_fetched(&mut self, url: String, guid: String, result: Result<String, String>) {
@@ -953,14 +993,19 @@ impl App {
             self.status = "no url".into();
             return;
         }
+        self.open_url(&item.url);
+    }
+
+    /// Open an arbitrary URL in the configured browser (fallback xdg-open).
+    fn open_url(&mut self, url: &str) {
         let cmd = self.cfg.browser.clone().unwrap_or_else(|| "xdg-open".to_string());
         let _ = std::process::Command::new(&cmd)
-            .arg(&item.url)
+            .arg(url)
             .spawn()
             .map_err(|e| {
                 self.status = format!("{cmd} failed: {e}");
             });
-        self.status = format!("opened {}", item.url);
+        self.status = format!("opened {url}");
     }
 
     /// Start the export flow: prompt with the default filename as placeholder.
@@ -1083,6 +1128,8 @@ fn main() -> io::Result<()> {
     }
 
     let mut terminal = ratatui::init();
+    // query terminal for kitty/sixel/halfblock image support (after alt-screen)
+    app.images.picker = ratatui_image::picker::Picker::from_query_stdio().ok();
     let result = run(&mut terminal, &mut app);
     ratatui::restore();
     result
@@ -1104,6 +1151,24 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()>
                 Msg::ArticleFetched { url, guid, result } => {
                     app.handle_article_fetched(url, guid, result)
                 }
+                Msg::ImageLoaded { url, data } => match data {
+                    Ok(bytes) => match image::load_from_memory(&bytes) {
+                        Ok(img) => {
+                            app.images.pending.remove(&url);
+                            app.images.cache.insert(url, img);
+                        }
+                        Err(e) => {
+                            app.images.pending.remove(&url);
+                            app.images.failed.insert(url);
+                            app.status = format!("image decode failed: {e}");
+                        }
+                    },
+                    Err(e) => {
+                        app.images.pending.remove(&url);
+                        app.images.failed.insert(url);
+                        app.status = format!("image fetch failed: {e}");
+                    }
+                },
                 Msg::RefreshTick => app.refresh_all(false),
             }
         }
