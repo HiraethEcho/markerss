@@ -211,8 +211,8 @@ impl App {
                     }
                 }
                 KeyCode::Enter if search_mode => {
-                    // keep the filter active (left stops it), close the box
-                    self.search_base = None;
+                    // keep the filter active (left stops it); keep the base
+                    // snapshot so left can restore the full list
                 }
                 KeyCode::Enter => {
                     self.input = Some(prompt);
@@ -765,11 +765,15 @@ impl App {
 
     /// Esc from the search box — restore the pre-search list.
     fn cancel_search(&mut self) {
-        if let Some(base) = self.search_base.take() {
-            self.scoped_items = base;
-        }
         self.search_active = false;
         self.search_query.clear();
+        if let Some(base) = self.search_base.take() {
+            self.scoped_items = base;
+        } else {
+            // snapshot already dropped (enter kept the filter) — rebuild the
+            // full scope list from scratch (active is false, so no re-filter)
+            self.rebuild_list();
+        }
         self.list_sel = 0;
     }
 
