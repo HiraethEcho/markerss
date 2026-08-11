@@ -120,7 +120,7 @@ struct RawConfig {
     default_view: Option<String>,
     images: Option<bool>,
     proxy: Option<String>,
-    keybindings: Option<String>,
+    keybindings: Option<std::collections::HashMap<String, String>>,
     sort: Option<Vec<String>>,
     foldlevel: Option<usize>,
 }
@@ -154,6 +154,7 @@ pub struct Config {
     pub proxy: Option<String>,
     pub sort: Vec<String>,
     pub foldlevel: Option<usize>,
+    pub keybindings: std::collections::HashMap<String, String>,
 }
 
 impl Config {
@@ -180,6 +181,7 @@ impl Config {
             proxy: None,
             sort: Vec::new(),
             foldlevel: None,
+            keybindings: std::collections::HashMap::new(),
             config_dir: config_dir.clone(),
         };
 
@@ -216,6 +218,9 @@ impl Config {
             self.sort = v.into_iter().take(3).collect();
         }
         self.foldlevel = raw.foldlevel;
+        if let Some(k) = raw.keybindings {
+            self.keybindings = k;
+        }
         if let Some(v) = raw.pane_ratio {
             if v.len() == 3 {
                 self.pane_ratio = [v[0], v[1], v[2]];
