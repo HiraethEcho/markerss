@@ -318,7 +318,22 @@ Advanced keys (planned, unbound or remapped — see Advanced): `gg/G`, `Ctrl+f/b
 
 ### Vim-like Keys
 
-- `gg` / `G` — jump to top / bottom (nav + list).
+Status per key — **[done]** rust implemented · **[dropped]** user removed · *(plain)* planned/not bound.
+
+- `gg` / `G` — jump to top / bottom (nav + list + article). **[done]**
+- `Ctrl+f` / `Ctrl+b` — full page down / up (list + article). **[done]**
+- `/` — modal search in list pane: live filter over title+summary; `enter` keeps the filter active (new appends still re-filter), `esc` or **left (`h`/`q`/`esc`) stops it** — the pre-search list is restored (first left cancels search and stays in the list; a second left goes back to nav). **[done]**
+- `yy` / `yn` — copy item URL / title (list + article). `yf` — copy feed URL. **[done]** (OSC52, no dependency)
+- `st` / `sn` / `sf` / `su` — push a sort level (time / title / feed / unread-first). **Last pressed = highest priority** (front of array): `st` → `["time"]`, then `sf` → `["feed", "time"]`. Keep only the last 3 presses — a 4th drops the oldest. **[done]**
+- `sT`/`sN`/`sF`/`sU` — push the same level **reversed** (per-level direction: `sT` = time ascending). **[done]**
+- `s` / `y` alone show their combo help in the status bar. **[done]**
+- `keybindings` config — remap single-key actions (see Config). **[done]**
+- `foldlevel` config — initial fold depth of nav Categories tree: `0` = all folded, `N` = levels 1..N open. **[done]**
+- `zr` / `zm` / `zR` / `zM` — fold level controls. **[dropped]** (user: not needed)
+- `zt` / `zz` / `zb` — scroll cursor to top / center / bottom (article). *(planned — scroll-only view, no cursor)*
+- `{` / `}` — jump prev / next paragraph (blank line) (article). *(planned)*
+- `[` / `]` — jump prev / next section (article headings h2/h3). *(planned)*
+- `gi` — toggle kitty image render (was `g`; `g` freed for `gg` top). *(planned — kitty deferred)*
 - `zr` / `zm` — decrease / increase fold level by 1 (unfold/fold one level).
 - `zR` / `zM` — open all folds / close all folds.
 - `Ctrl+f` / `Ctrl+b` — full page down / up (list + article).
