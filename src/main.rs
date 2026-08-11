@@ -109,11 +109,9 @@ struct App {
     article_area: Rect,
     running: bool,
     pending_g: bool,
-    pending_z: bool,
     pending_s: bool,
     pending_y: bool,
-    sort_stack: Vec<String>,
-    sort_reverse: bool,
+    sort_stack: Vec<(String, bool)>,
     search_base: Option<Vec<(String, Item)>>,
     input: Option<InputPrompt>,
     add_pending: Option<String>,
@@ -146,7 +144,8 @@ impl App {
         let db = Db::open(&cfg.db_path).expect("open sqlite db");
         let (tx, rx) = mpsc::channel();
         let theme = ThemeColors::load(cfg.theme_path.as_ref());
-        let sort_stack = cfg.sort.clone();
+        let sort_stack: Vec<(String, bool)> =
+            cfg.sort.iter().map(|s| (s.clone(), false)).collect();
         let mut app = App {
             cfg,
             theme,
@@ -174,11 +173,9 @@ impl App {
             article_area: Rect::default(),
             running: true,
             pending_g: false,
-            pending_z: false,
             pending_s: false,
             pending_y: false,
             sort_stack,
-            sort_reverse: false,
             search_base: None,
             input: None,
             add_pending: None,
@@ -1125,6 +1122,7 @@ impl App {
                     }
                 } else {
                     self.pending_y = true;
+                    self.status = "copy: yy item url · yn item title · yf feed url".into();
                 }
             }
             KeyCode::Char('n') if self.pending_y => {
@@ -1147,26 +1145,6 @@ impl App {
                     copy_to_clipboard(&u);
                     self.status = "copied feed url".into();
                 }
-            }
-            // zr/zm/zR/zM: fold control — must precede global r/R
-            KeyCode::Char('z') => {
-                self.pending_z = !self.pending_z;
-            }
-            KeyCode::Char('r') if self.pending_z => {
-                self.pending_z = false;
-                self.nav_z_fold(1);
-            }
-            KeyCode::Char('m') if self.pending_z => {
-                self.pending_z = false;
-                self.nav_z_fold(-1);
-            }
-            KeyCode::Char('R') if self.pending_z => {
-                self.pending_z = false;
-                self.nav_z_fold_all(true);
-            }
-            KeyCode::Char('M') if self.pending_z => {
-                self.pending_z = false;
-                self.nav_z_fold_all(false);
             }
             // r: partial refresh (fetch new unread, append); R: refresh all (rebuild)
             KeyCode::Char('r') => self.refresh_all(false),
@@ -1218,31 +1196,46 @@ impl App {
                 self.search_base = Some(self.scoped_items.clone());
                 self.start_input(InputMode::Search);
             }
-            // s-prefix: st/sn/sf/su sort levels; ss toggles reverse
-            KeyCode::Char('s') if self.pending_s && self.focus == 1 => {
-                self.pending_s = false;
-                self.sort_reverse = !self.sort_reverse;
-                self.rebuild_list();
-                self.status = if self.sort_reverse { "sort reversed".into() } else { "sort order normal".into() };
-            }
+            // s-prefix: sort levels — lowercase = forward, uppercase = reverse
+            // st/sn/sf/su: time/title/feed/unread · sT/sN/sF/sU: reversed
             KeyCode::Char('s') if self.focus == 1 => {
                 self.pending_s = !self.pending_s;
+                if self.pending_s {
+                    self.status =
+                        "sort: st/sn/sf/su (lowercase) or sT/sN/sF/sU (reversed) — time/title/feed/unread".into();
+                }
             }
             KeyCode::Char('t') if self.pending_s && self.focus == 1 => {
                 self.pending_s = false;
-                self.push_sort("time");
+                self.push_sort("time", false);
+            }
+            KeyCode::Char('T') if self.pending_s && self.focus == 1 => {
+                self.pending_s = false;
+                self.push_sort("time", true);
             }
             KeyCode::Char('n') if self.pending_s && self.focus == 1 => {
                 self.pending_s = false;
-                self.push_sort("title");
+                self.push_sort("title", false);
+            }
+            KeyCode::Char('N') if self.pending_s && self.focus == 1 => {
+                self.pending_s = false;
+                self.push_sort("title", true);
             }
             KeyCode::Char('f') if self.pending_s && self.focus == 1 => {
                 self.pending_s = false;
-                self.push_sort("feed");
+                self.push_sort("feed", false);
+            }
+            KeyCode::Char('F') if self.pending_s && self.focus == 1 => {
+                self.pending_s = false;
+                self.push_sort("feed", true);
             }
             KeyCode::Char('u') if self.pending_s && self.focus == 1 => {
                 self.pending_s = false;
-                self.push_sort("unread");
+                self.push_sort("unread", false);
+            }
+            KeyCode::Char('U') if self.pending_s && self.focus == 1 => {
+                self.pending_s = false;
+                self.push_sort("unread", true);
             }
             KeyCode::Tab => self.focus = (self.focus + 1) % 3,
             KeyCode::BackTab => self.focus = (self.focus + 2) % 3,
@@ -1292,10 +1285,9 @@ impl App {
         }
         // post-match: disarm pending prefixes (combos already consumed+cleared)
         match key {
-            KeyCode::Char('g') | KeyCode::Char('z') | KeyCode::Char('s') | KeyCode::Char('y') => {}
+            KeyCode::Char('g') | KeyCode::Char('s') | KeyCode::Char('y') => {}
             _ => {
                 self.pending_g = false;
-                self.pending_z = false;
                 self.pending_s = false;
                 self.pending_y = false;
             }
@@ -1613,51 +1605,6 @@ impl App {
         }
     }
 
-    /// zr/zm: fold level ±1 — collapse/expand every category (sections kept).
-    fn nav_z_fold(&mut self, delta: isize) {
-        let cats: Vec<String> = self
-            .feeds
-            .categories_tree()
-            .iter()
-            .map(|p| p.join("/"))
-            .collect();
-        for c in &cats {
-            if delta > 0 {
-                self.collapsed.insert(c.clone());
-            } else {
-                self.collapsed.remove(c);
-            }
-        }
-        self.rebuild_tree();
-    }
-
-    /// zR (collapse=false): open all folds. zM (collapse=true): fold everything.
-    fn nav_z_fold_all(&mut self, collapse: bool) {
-        if !collapse {
-            self.collapsed.clear();
-            self.fav_expanded = true;
-            self.uncat_expanded = true;
-        } else {
-            for s in [
-                "Categories",
-                "Tags",
-                "Feeds",
-                "Favourite",
-            ] {
-                self.collapsed.insert(s.to_string());
-            }
-            for path in self.feeds.categories_tree() {
-                self.collapsed.insert(path.join("/"));
-            }
-            for t in self.feeds.all_feed_tags() {
-                self.collapsed.insert(format!("tag:{t}"));
-            }
-            self.fav_expanded = false;
-            self.uncat_expanded = false;
-        }
-        self.rebuild_tree();
-    }
-
     /// Apply the current search query to the snapshot taken when `/` opened.
     fn apply_search_filter(&mut self, q: &str) {
         let Some(base) = &self.search_base else { return };
@@ -1687,12 +1634,18 @@ impl App {
     }
 
     /// Push a sort level (last pressed = highest priority); keep last 3.
-    fn push_sort(&mut self, level: &str) {
-        self.sort_stack.retain(|l| l != level);
-        self.sort_stack.insert(0, level.to_string());
+    /// `reverse` inverts that level's direction (sT = time ascending).
+    fn push_sort(&mut self, level: &str, reverse: bool) {
+        self.sort_stack.retain(|(l, _)| l != level);
+        self.sort_stack.insert(0, (level.to_string(), reverse));
         self.sort_stack.truncate(3);
         self.rebuild_list();
-        self.status = format!("sort: {}", self.sort_stack.join(" > "));
+        let shown: Vec<String> = self
+            .sort_stack
+            .iter()
+            .map(|(l, r)| format!("{}{}", if *r { "-" } else { "" }, l))
+            .collect();
+        self.status = format!("sort: {}", shown.join(" > "));
     }
 
     /// Sort the current list snapshot by the sort stack (no DB changes).
@@ -1700,11 +1653,10 @@ impl App {
         if self.sort_stack.is_empty() {
             return;
         }
-        let rev = self.sort_reverse;
         self.scoped_items.sort_by(|(ua, a), (ub, b)| {
             let mut ord = std::cmp::Ordering::Equal;
-            for level in &self.sort_stack {
-                ord = match level.as_str() {
+            for (level, reverse) in &self.sort_stack {
+                let mut o = match level.as_str() {
                     "time" => b.date.cmp(&a.date), // newest first
                     "title" => a.title.cmp(&b.title),
                     "feed" => ua.cmp(ub),
@@ -1715,15 +1667,15 @@ impl App {
                     }
                     _ => ord,
                 };
-                if ord != std::cmp::Ordering::Equal {
+                if *reverse {
+                    o = o.reverse();
+                }
+                if o != std::cmp::Ordering::Equal {
+                    ord = o;
                     break;
                 }
             }
-            if rev {
-                ord.reverse()
-            } else {
-                ord
-            }
+            ord
         });
     }
 }
@@ -1756,6 +1708,13 @@ fn slugify(title: &str) -> String {
 
 fn fmt_date(iso: &str) -> String {
     iso.chars().take(10).collect()
+}
+
+/// Approximate terminal display width (CJK wide chars count 2).
+fn display_width(s: &str) -> usize {
+    s.chars()
+        .map(|c| if (c as u32) >= 0x2E80 { 2 } else { 1 })
+        .sum()
 }
 
 /// Copy text to the system clipboard via OSC52 (terminal-dependent;
@@ -2059,8 +2018,17 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     // Fixed header (title/meta/summary), content scrolls below a separator.
     let block = pane_block("Article", app.focus == 2);
     let inner = block.inner(area);
+    // dynamic header height so a long summary is fully visible
+    let summary = item.summary.trim();
+    let summary_w = (inner.width.saturating_sub(2)).max(1) as usize;
+    let summary_lines = if summary.is_empty() {
+        1
+    } else {
+        display_width(summary).div_ceil(summary_w).clamp(1, 8)
+    };
+    let head_h = (4 + summary_lines) as u16;
     let [head, sep, body] = Layout::vertical([
-        Constraint::Length(6),
+        Constraint::Length(head_h),
         Constraint::Length(1),
         Constraint::Min(0),
     ])
@@ -2180,13 +2148,13 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
     let text = Text::from(
         "Keys\n\
          ─────\n\
-         nav:   j/k move · h/l expand/collapse+descend · N add feed · d delete · M rename · F favourite · zr/zm/zR/zM folds\n\
+         nav:   j/k move · h/l expand/collapse+descend · N add feed · d delete · M rename · F favourite\n\
          list:  j/k move · l/enter open (mark read) · / search (live filter) · n/p unread jump\n\
          article: j/k scroll · n/p item · ctrl+u/d half page · ctrl+f/b full page · l/enter fetch full\n\
          left:  h/q/esc — article→list→nav→parent\n\
          right: l/enter — expand→list→article→fetch\n\
          jump:  gg/G top/bottom (nav+list+article)\n\
-         sort:  st time · sn title · sf feed · su unread · ss reverse (list)\n\
+         sort:  st/sn/sf/su forward · sT/sN/sF/sU reversed — time/title/feed/unread\n\
          copy:  yy url · yn title · yf feed url\n\
          global: o browser · e export · a read · A all-read · L/S flags · r/R refresh\n\
          i/x OPML · tab focus · Q quit · ? help\n\n\
