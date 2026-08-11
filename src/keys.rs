@@ -161,6 +161,8 @@ impl App {
             Action::FocusNext => self.focus = (self.focus + 1) % 3,
             Action::Search if self.focus == 1 => {
                 self.search_base = Some(self.scoped_items.clone());
+                self.search_active = true;
+                self.search_query.clear();
                 self.start_input(InputMode::Search);
             }
             Action::JumpTop => match self.focus {
@@ -209,7 +211,7 @@ impl App {
                     }
                 }
                 KeyCode::Enter if search_mode => {
-                    // keep the filter, close the input box
+                    // keep the filter active (left stops it), close the box
                     self.search_base = None;
                 }
                 KeyCode::Enter => {
@@ -446,6 +448,11 @@ impl App {
 
     /// Left: article→list→nav→parent in file tree.
     fn go_left(&mut self) {
+        // an active search is stopped by left; list stays until next left
+        if self.focus == 1 && self.search_active {
+            self.cancel_search();
+            return;
+        }
         match self.focus {
             2 => {
                 if self.fullscreen {
@@ -729,6 +736,7 @@ impl App {
 
     /// Apply the current search query to the snapshot taken when `/` opened.
     pub(crate) fn apply_search_filter(&mut self, q: &str) {
+        self.search_query = q.to_string();
         let Some(base) = &self.search_base else { return };
         let q = q.trim().to_lowercase();
         if q.is_empty() {
@@ -749,13 +757,9 @@ impl App {
 
     /// Re-run the active search filter after list mutations (append/rebuild).
     pub(crate) fn reapply_search_filter(&mut self) {
-        if self.search_base.is_some() {
-            if let Some(p) = &self.input {
-                if p.mode == InputMode::Search {
-                    let q = p.buf.clone();
-                    self.apply_search_filter(&q);
-                }
-            }
+        if self.search_active {
+            let q = self.search_query.clone();
+            self.apply_search_filter(&q);
         }
     }
 
@@ -764,6 +768,8 @@ impl App {
         if let Some(base) = self.search_base.take() {
             self.scoped_items = base;
         }
+        self.search_active = false;
+        self.search_query.clear();
         self.list_sel = 0;
     }
 

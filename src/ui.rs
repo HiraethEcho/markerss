@@ -429,7 +429,7 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
         "Keys\n\
          ─────\n\
          nav:   j/k move · h/l expand/collapse+descend · N add feed · d delete · M rename · F favourite\n\
-         list:  j/k move · l/enter open (mark read) · / search (live filter) · n/p unread jump\n\
+         list:  j/k move · l/enter open (mark read) · / search (enter keep, left stop) · n/p unread jump\n\
          article: j/k scroll · n/p item · ctrl+u/d half page · ctrl+f/b full page · l/enter fetch full\n\
          left:  h/q/esc — article→list→nav→parent\n\
          right: l/enter — expand→list→article→fetch\n\

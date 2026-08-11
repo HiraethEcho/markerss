@@ -116,6 +116,8 @@ struct App {
     pending_y: bool,
     sort_stack: Vec<(String, bool)>,
     search_base: Option<Vec<(String, Item)>>,
+    search_active: bool,
+    search_query: String,
     keymap: std::collections::HashMap<KeyCode, crate::keys::Action>,
     feed_errors: std::collections::HashMap<String, String>,
     input: Option<InputPrompt>,
@@ -183,6 +185,8 @@ impl App {
             pending_y: false,
             sort_stack,
             search_base: None,
+            search_active: false,
+            search_query: String::new(),
             keymap,
             feed_errors: std::collections::HashMap::new(),
             input: None,
@@ -335,6 +339,8 @@ impl App {
     /// Drop any active search when the scope changes (its base snapshot is stale).
     fn clear_search(&mut self) {
         self.search_base = None;
+        self.search_active = false;
+        self.search_query.clear();
         if let Some(p) = &self.input {
             if p.mode == InputMode::Search {
                 self.input = None;
