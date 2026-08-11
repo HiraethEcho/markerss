@@ -25,7 +25,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::config::Config;
+use crate::config::{Config, ThemeColors};
 use crate::db::Db;
 use crate::feedlist::{Feed, File};
 
@@ -53,6 +53,7 @@ enum InputMode {
     EditTag,
     ExportFile,
     ImportOpml,
+    Search,
 }
 
 struct InputPrompt {
@@ -75,6 +76,7 @@ enum Scope {
 
 struct App {
     cfg: Config,
+    theme: ThemeColors,
     feeds: File,
     db: Db,
 
@@ -106,6 +108,13 @@ struct App {
     pending_refreshes: usize,
     article_area: Rect,
     running: bool,
+    pending_g: bool,
+    pending_z: bool,
+    pending_s: bool,
+    pending_y: bool,
+    sort_stack: Vec<String>,
+    sort_reverse: bool,
+    search_base: Option<Vec<(String, Item)>>,
     input: Option<InputPrompt>,
     add_pending: Option<String>,
     add_pending_title: Option<String>,
@@ -136,8 +145,11 @@ impl App {
         let feeds = File::load_or_default(&cfg.urls_path);
         let db = Db::open(&cfg.db_path).expect("open sqlite db");
         let (tx, rx) = mpsc::channel();
+        let theme = ThemeColors::load(cfg.theme_path.as_ref());
+        let sort_stack = cfg.sort.clone();
         let mut app = App {
             cfg,
+            theme,
             feeds,
             db,
             collapsed: Default::default(),
@@ -161,6 +173,13 @@ impl App {
             pending_refreshes: 0,
             article_area: Rect::default(),
             running: true,
+            pending_g: false,
+            pending_z: false,
+            pending_s: false,
+            pending_y: false,
+            sort_stack,
+            sort_reverse: false,
+            search_base: None,
             input: None,
             add_pending: None,
             add_pending_title: None,
@@ -401,6 +420,8 @@ impl App {
         // on read toggles so the selection stays on the same item
         items.sort_by(|a, b| b.1.date.cmp(&a.1.date));
         self.scoped_items = items;
+        // explicit sort stack (st/sn/sf/su) re-orders the snapshot on demand
+        self.apply_sort();
         if self.list_sel >= self.scoped_items.len() {
             self.list_sel = self.scoped_items.len().saturating_sub(1);
         }
@@ -494,6 +515,7 @@ impl App {
                 "tags (space-separated, empty = none):".to_string()
             }
             InputMode::RenameCategory => "new category name:".to_string(),
+            InputMode::Search => "/ search:".to_string(),
             InputMode::EditFeedTitle => "display title (empty = default):".to_string(),
             InputMode::EditTag => "new tag name:".to_string(),
             InputMode::ExportFile => "export as (enter = default):".to_string(),
@@ -530,6 +552,7 @@ impl App {
         let Some(prompt) = self.input.take() else { return };
         let val = prompt.buf.trim().to_string();
         match prompt.mode {
+            InputMode::Search => {} // Enter is intercepted before submit
             InputMode::AddUrl => {
                 if val.is_empty() {
                     self.status = "add feed cancelled (empty url)".into();
@@ -1034,26 +1057,68 @@ impl App {
             }
             return;
         }
-        if let Some(prompt) = self.input.as_mut() {
+        if let Some(mut prompt) = self.input.take() {
+            let search_mode = prompt.mode == InputMode::Search;
             match key {
-                KeyCode::Esc => self.input = None,
-                KeyCode::Enter => self.submit_input(),
+                KeyCode::Esc => {
+                    if search_mode {
+                        self.cancel_search();
+                    }
+                }
+                KeyCode::Enter if search_mode => {
+                    // keep the filter, close the input box
+                    self.search_base = None;
+                }
+                KeyCode::Enter => {
+                    self.input = Some(prompt);
+                    self.submit_input();
+                    return;
+                }
                 KeyCode::Backspace => {
                     prompt.buf.pop();
+                    if search_mode {
+                        self.apply_search_filter(&prompt.buf);
+                    }
+                    self.input = Some(prompt);
                 }
-                KeyCode::Char(c) => prompt.buf.push(c),
+                KeyCode::Char(c) => {
+                    prompt.buf.push(c);
+                    if search_mode {
+                        self.apply_search_filter(&prompt.buf);
+                    }
+                    self.input = Some(prompt);
+                }
+                _ => {
+                    self.input = Some(prompt);
+                }
+            }
+            return;
+        }
+        // ctrl+u / ctrl+d half-page (article); ctrl+f/b full page (list+article)
+        if mods.contains(KeyModifiers::CONTROL) {
+            match key {
+                KeyCode::Char('f') | KeyCode::Char('b') if self.focus >= 1 => {
+                    let dir = if key == KeyCode::Char('f') { 1 } else { -1 };
+                    self.page_scroll(dir);
+                }
+                _ if self.focus == 2 => self.article_scroll_ctrl(key),
                 _ => {}
             }
             return;
         }
-        // ctrl+u / ctrl+d belong to the article pane (half-page scroll)
-        if mods.contains(KeyModifiers::CONTROL) {
-            if self.focus == 2 {
-                self.article_scroll_ctrl(key);
-            }
-            return;
+        // any key other than g/z/y/s/d disarms the prefix keys + delete-confirm
+        if key != KeyCode::Char('g') {
+            self.pending_g = false;
         }
-        // any key other than d disarms the delete-confirm
+        if key != KeyCode::Char('z') {
+            self.pending_z = false;
+        }
+        if key != KeyCode::Char('y') {
+            self.pending_y = false;
+        }
+        if key != KeyCode::Char('s') {
+            self.pending_s = false;
+        }
         if key != KeyCode::Char('d') {
             self.delete_armed = false;
         }
@@ -1063,13 +1128,59 @@ impl App {
             // right: l / enter — expand tree→list→article→fetch full
             KeyCode::Char('l') | KeyCode::Enter => self.go_right(),
             KeyCode::Char('Q') => self.running = false,
-            // F: nav → favourite feed; article → fullscreen
-            KeyCode::Char('F') if self.focus == 0 => self.toggle_favourite_feed(),
-            KeyCode::Char('F') if self.focus == 2 => {
-                self.fullscreen = !self.fullscreen;
+            // y-prefix: yy item url, yn item title, yf feed url
+            KeyCode::Char('y') => {
+                if self.pending_y {
+                    self.pending_y = false;
+                    if let Some((_, item)) = self.current_item() {
+                        copy_to_clipboard(&item.url);
+                        self.status = "copied item url".into();
+                    }
+                } else {
+                    self.pending_y = true;
+                }
             }
-            KeyCode::Char('f') if self.focus == 0 => self.toggle_favourite_feed(),
-            KeyCode::Char('?') => self.show_help = true,
+            KeyCode::Char('n') if self.pending_y => {
+                self.pending_y = false;
+                if let Some((_, item)) = self.current_item() {
+                    copy_to_clipboard(item.display_title());
+                    self.status = "copied item title".into();
+                }
+            }
+            KeyCode::Char('f') if self.pending_y => {
+                self.pending_y = false;
+                let url = match self.focus {
+                    0 => self.tree_rows.get(self.tree_sel).and_then(|r| match r {
+                        TreeRow::Feed(u, _, _) | TreeRow::FavouriteFeed(u, _) | TreeRow::UncategorizedFeed(u, _) => Some(u.clone()),
+                        _ => None,
+                    }),
+                    _ => self.current_item().map(|(u, _)| u),
+                };
+                if let Some(u) = url {
+                    copy_to_clipboard(&u);
+                    self.status = "copied feed url".into();
+                }
+            }
+            // zr/zm/zR/zM: fold control (nav) — must precede global r/R
+            KeyCode::Char('z') if self.focus == 0 => {
+                self.pending_z = !self.pending_z;
+            }
+            KeyCode::Char('r') if self.focus == 0 && self.pending_z => {
+                self.pending_z = false;
+                self.nav_z_fold(1);
+            }
+            KeyCode::Char('m') if self.focus == 0 && self.pending_z => {
+                self.pending_z = false;
+                self.nav_z_fold(-1);
+            }
+            KeyCode::Char('R') if self.focus == 0 && self.pending_z => {
+                self.pending_z = false;
+                self.nav_z_fold_all(true);
+            }
+            KeyCode::Char('M') if self.focus == 0 && self.pending_z => {
+                self.pending_z = false;
+                self.nav_z_fold_all(false);
+            }
             // r: partial refresh (fetch new unread, append); R: refresh all (rebuild)
             KeyCode::Char('r') => self.refresh_all(false),
             KeyCode::Char('R') => self.refresh_all(true),
@@ -1082,6 +1193,70 @@ impl App {
             // L / S: item flags from list or article pane (toggle; again to cancel)
             KeyCode::Char('L') if self.focus >= 1 => self.toggle_item_flag("read_later"),
             KeyCode::Char('S') if self.focus >= 1 => self.toggle_item_flag("saved"),
+            // gg / G: jump top / bottom (nav + list + article)
+            KeyCode::Char('g') => {
+                if self.pending_g {
+                    self.pending_g = false;
+                    match self.focus {
+                        0 => self.tree_sel = 0,
+                        1 => {
+                            self.list_sel = 0;
+                            self.article_scroll = 0;
+                        }
+                        2 => self.article_scroll = 0,
+                        _ => {}
+                    }
+                } else {
+                    self.pending_g = true;
+                }
+            }
+            KeyCode::Char('G') => match self.focus {
+                0 => self.tree_sel = self.tree_rows.len().saturating_sub(1),
+                1 => {
+                    self.list_sel = self.scoped_items.len().saturating_sub(1);
+                    self.article_scroll = 0;
+                }
+                2 => self.article_scroll = u16::MAX, // clamped at render
+                _ => {}
+            },
+            // F: nav → favourite feed; article → fullscreen
+            KeyCode::Char('F') if self.focus == 0 => self.toggle_favourite_feed(),
+            KeyCode::Char('F') if self.focus == 2 => {
+                self.fullscreen = !self.fullscreen;
+            }
+            KeyCode::Char('f') if self.focus == 0 => self.toggle_favourite_feed(),
+            KeyCode::Char('?') => self.show_help = true,
+            // / — modal list search (live filter; enter keeps, esc restores)
+            KeyCode::Char('/') if self.focus == 1 => {
+                self.search_base = Some(self.scoped_items.clone());
+                self.start_input(InputMode::Search);
+            }
+            // s-prefix: st/sn/sf/su sort levels; ss toggles reverse
+            KeyCode::Char('s') if self.focus == 1 && self.pending_s => {
+                self.pending_s = false;
+                self.sort_reverse = !self.sort_reverse;
+                self.rebuild_list();
+                self.status = if self.sort_reverse { "sort reversed".into() } else { "sort order normal".into() };
+            }
+            KeyCode::Char('s') if self.focus == 1 => {
+                self.pending_s = !self.pending_s;
+            }
+            KeyCode::Char('t') if self.focus == 1 && self.pending_s => {
+                self.pending_s = false;
+                self.push_sort("time");
+            }
+            KeyCode::Char('n') if self.focus == 1 && self.pending_s => {
+                self.pending_s = false;
+                self.push_sort("title");
+            }
+            KeyCode::Char('f') if self.focus == 1 && self.pending_s => {
+                self.pending_s = false;
+                self.push_sort("feed");
+            }
+            KeyCode::Char('u') if self.focus == 1 && self.pending_s => {
+                self.pending_s = false;
+                self.push_sort("unread");
+            }
             KeyCode::Tab => self.focus = (self.focus + 1) % 3,
             KeyCode::BackTab => self.focus = (self.focus + 2) % 3,
             KeyCode::Char('N') if self.focus == 0 => self.start_input(InputMode::AddUrl),
@@ -1420,6 +1595,140 @@ impl App {
             _ => {}
         }
     }
+
+    /// Ctrl+f / Ctrl+b: full-page move — list selection or article scroll.
+    fn page_scroll(&mut self, dir: isize) {
+        let page = (self.article_area.height.saturating_sub(4)).max(1) as isize;
+        match self.focus {
+            1 => {
+                let n = self.scoped_items.len() as isize;
+                if n > 0 {
+                    self.list_sel =
+                        (self.list_sel as isize + dir * page).clamp(0, n - 1) as usize;
+                    self.article_scroll = 0;
+                }
+            }
+            2 => {
+                self.article_scroll =
+                    (self.article_scroll as isize + dir * page).max(0) as u16;
+            }
+            _ => {}
+        }
+    }
+
+    /// zr/zm: fold level ±1 — collapse/expand every category (sections kept).
+    fn nav_z_fold(&mut self, delta: isize) {
+        let cats: Vec<String> = self
+            .feeds
+            .categories_tree()
+            .iter()
+            .map(|p| p.join("/"))
+            .collect();
+        for c in &cats {
+            if delta > 0 {
+                self.collapsed.insert(c.clone());
+            } else {
+                self.collapsed.remove(c);
+            }
+        }
+        self.rebuild_tree();
+    }
+
+    /// zR (collapse=false): open all folds. zM (collapse=true): fold everything.
+    fn nav_z_fold_all(&mut self, collapse: bool) {
+        if !collapse {
+            self.collapsed.clear();
+            self.fav_expanded = true;
+            self.uncat_expanded = true;
+        } else {
+            for s in [
+                "Categories",
+                "Tags",
+                "Feeds",
+                "Favourite",
+            ] {
+                self.collapsed.insert(s.to_string());
+            }
+            for path in self.feeds.categories_tree() {
+                self.collapsed.insert(path.join("/"));
+            }
+            for t in self.feeds.all_feed_tags() {
+                self.collapsed.insert(format!("tag:{t}"));
+            }
+            self.fav_expanded = false;
+            self.uncat_expanded = false;
+        }
+        self.rebuild_tree();
+    }
+
+    /// Apply the current search query to the snapshot taken when `/` opened.
+    fn apply_search_filter(&mut self, q: &str) {
+        let Some(base) = &self.search_base else { return };
+        let q = q.trim().to_lowercase();
+        if q.is_empty() {
+            self.scoped_items = base.clone();
+        } else {
+            self.scoped_items = base
+                .iter()
+                .filter(|(_, i)| {
+                    i.title.to_lowercase().contains(&q)
+                        || i.summary.to_lowercase().contains(&q)
+                })
+                .cloned()
+                .collect();
+        }
+        self.list_sel = 0;
+        self.article_scroll = 0;
+    }
+
+    /// Esc from the search box — restore the pre-search list.
+    fn cancel_search(&mut self) {
+        if let Some(base) = self.search_base.take() {
+            self.scoped_items = base;
+        }
+        self.list_sel = 0;
+    }
+
+    /// Push a sort level (last pressed = highest priority); keep last 3.
+    fn push_sort(&mut self, level: &str) {
+        self.sort_stack.retain(|l| l != level);
+        self.sort_stack.insert(0, level.to_string());
+        self.sort_stack.truncate(3);
+        self.rebuild_list();
+        self.status = format!("sort: {}", self.sort_stack.join(" > "));
+    }
+
+    /// Sort the current list snapshot by the sort stack (no DB changes).
+    fn apply_sort(&mut self) {
+        if self.sort_stack.is_empty() {
+            return;
+        }
+        let rev = self.sort_reverse;
+        self.scoped_items.sort_by(|(ua, a), (ub, b)| {
+            let mut ord = std::cmp::Ordering::Equal;
+            for level in &self.sort_stack {
+                ord = match level.as_str() {
+                    "time" => b.date.cmp(&a.date), // newest first
+                    "title" => a.title.cmp(&b.title),
+                    "feed" => ua.cmp(ub),
+                    "unread" => {
+                        let ra = self.db.is_read(ua, &a.guid).unwrap_or(false);
+                        let rb = self.db.is_read(ub, &b.guid).unwrap_or(false);
+                        ra.cmp(&rb)
+                    }
+                    _ => ord,
+                };
+                if ord != std::cmp::Ordering::Equal {
+                    break;
+                }
+            }
+            if rev {
+                ord.reverse()
+            } else {
+                ord
+            }
+        });
+    }
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -1450,6 +1759,38 @@ fn slugify(title: &str) -> String {
 
 fn fmt_date(iso: &str) -> String {
     iso.chars().take(10).collect()
+}
+
+/// Copy text to the system clipboard via OSC52 (terminal-dependent;
+/// harmless no-op on terminals that ignore it).
+fn copy_to_clipboard(s: &str) {
+    use std::io::Write;
+    let b64 = base64_encode(s.as_bytes());
+    let _ = std::io::stdout().write_all(format!("\x1b]52;c;{b64}\x07").as_bytes());
+    let _ = std::io::stdout().flush();
+}
+
+/// Minimal base64 (RFC 4648) — no dependency.
+fn base64_encode(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
+        out.push(T[(n >> 18) as usize & 63] as char);
+        out.push(T[(n >> 12) as usize & 63] as char);
+        if chunk.len() > 1 {
+            out.push(T[(n >> 6) as usize & 63] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(T[n as usize & 63] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
 }
 
 // ─── rendering ──────────────────────────────────────────────────────────────
@@ -1681,9 +2022,12 @@ fn render_article_text(app: &App, item: &Item) -> ratatui::text::Text<'static> {
     if md.trim().is_empty() {
         return Text::from(""); // caller falls back to the fetch hint
     }
-    let link_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::UNDERLINED);
-    let img_style = Style::default().fg(Color::DarkGray);
+    let link_style = Style::default()
+        .fg(app.theme.accent)
+        .add_modifier(Modifier::UNDERLINED);
+    let img_style = Style::default().fg(app.theme.dim);
     let renderer = the_other_tui_markdown::RendererBuilder::new()
+        .with_theme(app.theme.md.clone())
         .with_link(move |alt, _url| {
             vec![Span::styled(alt.to_string(), link_style)]
         })
@@ -1725,9 +2069,9 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     ])
     .areas(inner);
 
-    let title_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
-    let meta_style = Style::default().fg(Color::Cyan);
-    let dim_style = Style::default().fg(Color::DarkGray);
+    let title_style = Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD);
+    let meta_style = Style::default().fg(app.theme.dim);
+    let dim_style = Style::default().fg(app.theme.dim);
     let read_mark = if app.db.is_read(&url, &item.guid).unwrap_or(false) {
         "read"
     } else {
@@ -1758,7 +2102,7 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     frame.render_widget(
         Paragraph::new(Span::styled(
             "─".repeat(sep.width as usize),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(app.theme.dim),
         )),
         sep,
     );
@@ -1789,10 +2133,40 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     } else {
         Text::from("l/enter to read")
     };
-    let para = Paragraph::new(body_text)
+    // clamp scroll to content length (G jumps to bottom, not past it)
+    let max_scroll = (body_text.lines.len() as u16).saturating_sub(body.height);
+    let scroll = app.article_scroll.min(max_scroll);
+    let para = Paragraph::new(body_text.clone())
         .wrap(Wrap { trim: true })
-        .scroll((app.article_scroll, 0));
-    frame.render_widget(para, body);
+        .scroll((scroll, 0));
+    // reading width: cap the body at ~80 cols, centered in the pane
+    let content_w = body.width.min(80);
+    let x_off = (body.width - content_w) / 2;
+    let content_area = Rect {
+        x: body.x + x_off,
+        y: body.y,
+        width: content_w,
+        height: body.height,
+    };
+    frame.render_widget(para, content_area);
+
+    // scrollbar on the pane's right edge (rough estimate of wrapped lines)
+    let total = body_text.lines.len() as u16;
+    if total > body.height && scroll > 0 {
+        let pos = scroll;
+        let bar_h = ((body.height as f32 * body.height as f32 / total as f32).max(1.0)) as u16;
+        let bar_y = (pos as f32 * (body.height - bar_h) as f32 / max_scroll as f32) as u16;
+        let sb_area = Rect {
+            x: body.x + body.width - 1,
+            y: body.y + bar_y,
+            width: 1,
+            height: bar_h,
+        };
+        frame.render_widget(
+            Paragraph::new(" ").style(Style::default().bg(app.theme.dim)),
+            sb_area,
+        );
+    }
 
     frame.render_widget(block, area);
 }
@@ -1809,13 +2183,16 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
     let text = Text::from(
         "Keys\n\
          ─────\n\
-         nav:   j/k move · h/l expand/collapse+descend · N add feed · d delete · M rename (category/tag/feed title) · F favourite\n\
-         list:  j/k move · l/enter open (mark read)\n\
-         article: j/k scroll · n/p item · ctrl+u/ctrl+d half page · l/enter fetch full\n\
+         nav:   j/k move · h/l expand/collapse+descend · N add feed · d delete · M rename · F favourite · zr/zm/zR/zM folds\n\
+         list:  j/k move · l/enter open (mark read) · / search (live filter) · n/p unread jump\n\
+         article: j/k scroll · n/p item · ctrl+u/d half page · ctrl+f/b full page · l/enter fetch full\n\
          left:  h/q/esc — article→list→nav→parent\n\
          right: l/enter — expand→list→article→fetch\n\
-         global: o browser · e export · a toggle read · A mark all read\n\
-         r partial refresh · R refresh all · i import OPML · x export OPML · tab focus · Q quit · ? help\n\n\
+         jump:  gg/G top/bottom (nav+list+article)\n\
+         sort:  st time · sn title · sf feed · su unread · ss reverse (list)\n\
+         copy:  yy url · yn title · yf feed url\n\
+         global: o browser · e export · a read · A all-read · L/S flags · r/R refresh\n\
+         i/x OPML · tab focus · Q quit · ? help\n\n\
          export → $XDG_DATA_HOME/markerss/<category>/<slug>.md",
     );
     // floating opaque window, default colors, scrollable with j/k
@@ -1841,6 +2218,21 @@ fn draw_input(frame: &mut Frame, area: Rect, prompt: &InputPrompt) {
         .borders(Borders::ALL)
         .title("input (esc cancel)")
         .style(Style::default().bg(Color::Blue));
+    if prompt.mode == InputMode::Search {
+        // search box floats under the list pane
+        let box_rect = Rect {
+            x: area.x + area.width / 6,
+            y: area.y + 1,
+            width: area.width * 2 / 3,
+            height: 3,
+        };
+        frame.render_widget(ratatui::widgets::Clear, box_rect);
+        frame.render_widget(
+            Paragraph::new(text).block(block.title("search (enter keep · esc restore)")),
+            box_rect,
+        );
+        return;
+    }
     let box_rect = Rect {
         x: area.x + area.width / 4,
         y: area.y + area.height / 2,
@@ -1861,6 +2253,14 @@ fn pane_block<'a>(title: &'a str, focused: bool) -> Block<'a> {
 fn main() -> io::Result<()> {
     let cfg = Config::load();
     let mut app = App::new(cfg);
+    // foldlevel: initial nav fold depth (0 = only top rows visible)
+    if let Some(level) = app.cfg.foldlevel {
+        for path in app.feeds.categories_tree() {
+            if path.len() > level {
+                app.collapsed.insert(path.join("/"));
+            }
+        }
+    }
     app.db.cleanup_content(app.cfg.cache_ttl_days).ok();
     // startup: fetch new items (append-only) — never a full refresh
     if app.cfg.refresh_on_startup {
@@ -1904,4 +2304,24 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()>
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base64_roundtrip() {
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn slugify_strips_edges() {
+        assert_eq!(slugify("  Hello World!  "), "hello-world");
+        assert_eq!(slugify("---"), "untitled");
+    }
 }

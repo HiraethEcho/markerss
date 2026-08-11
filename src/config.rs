@@ -13,9 +13,97 @@ use std::path::PathBuf;
 use serde::Deserialize;
 
 use crate::xdg;
+use ratatui::style::{Color, Modifier, Style};
 
 pub const DEFAULT_NAV_PRESET: [&str; 6] =
     ["Unread", "Read Later", "Favourite", "Categories", "Tags", "Saved"];
+
+/// App colors: markdown element theme + pane accent/dim colors.
+/// Loaded from the optional `theme` file (TOML, named colors).
+#[derive(Debug, Clone)]
+pub struct ThemeColors {
+    pub md: the_other_tui_markdown::Theme,
+    pub accent: Color,
+    pub dim: Color,
+}
+
+impl Default for ThemeColors {
+    fn default() -> Self {
+        Self {
+            md: the_other_tui_markdown::Theme::default(),
+            accent: Color::Yellow,
+            dim: Color::DarkGray,
+        }
+    }
+}
+
+impl ThemeColors {
+    pub fn load(path: Option<&PathBuf>) -> ThemeColors {
+        let mut t = ThemeColors::default();
+        let Some(p) = path else { return t };
+        let Ok(text) = fs::read_to_string(p) else { return t };
+        #[derive(Deserialize, Default)]
+        #[serde(default)]
+        struct RawTheme {
+            h1: Option<String>,
+            h2: Option<String>,
+            h3: Option<String>,
+            code: Option<String>,
+            quote: Option<String>,
+            link: Option<String>,
+            accent: Option<String>,
+            dim: Option<String>,
+        }
+        let raw: RawTheme = match toml::from_str(&text) {
+            Ok(r) => r,
+            Err(_) => return t,
+        };
+        let bold = |c: Color| Style::new().fg(c).add_modifier(Modifier::BOLD);
+        if let Some(c) = raw.h1.as_deref().and_then(color_from_str) {
+            t.md.h1 = bold(c);
+        }
+        if let Some(c) = raw.h2.as_deref().and_then(color_from_str) {
+            t.md.h2 = Style::new().fg(c).add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+        }
+        if let Some(c) = raw.h3.as_deref().and_then(color_from_str) {
+            t.md.h3 = bold(c);
+        }
+        if let Some(c) = raw.code.as_deref().and_then(color_from_str) {
+            t.md.inline_code = Style::new().fg(c);
+            t.md.code_block = Style::new().fg(c);
+        }
+        if let Some(c) = raw.quote.as_deref().and_then(color_from_str) {
+            t.md.block_quote = Style::new().fg(c).add_modifier(Modifier::ITALIC);
+        }
+        if let Some(c) = raw.link.as_deref().and_then(color_from_str) {
+            t.md.link = Style::new().fg(c).add_modifier(Modifier::UNDERLINED);
+        }
+        if let Some(c) = raw.accent.as_deref().and_then(color_from_str) {
+            t.accent = c;
+        }
+        if let Some(c) = raw.dim.as_deref().and_then(color_from_str) {
+            t.dim = c;
+        }
+        t
+    }
+}
+
+/// Named color → ratatui Color (16-color palette).
+pub fn color_from_str(s: &str) -> Option<Color> {
+    Some(match s.to_ascii_lowercase().as_str() {
+        "black" => Color::Black,
+        "red" => Color::Red,
+        "green" => Color::Green,
+        "yellow" => Color::Yellow,
+        "blue" => Color::Blue,
+        "magenta" => Color::Magenta,
+        "cyan" => Color::Cyan,
+        "gray" | "grey" => Color::Gray,
+        "darkgray" | "darkgrey" => Color::DarkGray,
+        "white" => Color::White,
+        _ => return None,
+    })
+}
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
@@ -33,6 +121,8 @@ struct RawConfig {
     images: Option<bool>,
     proxy: Option<String>,
     keybindings: Option<String>,
+    sort: Option<Vec<String>>,
+    foldlevel: Option<usize>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -62,6 +152,8 @@ pub struct Config {
     pub default_view: Option<String>,
     pub images: bool,
     pub proxy: Option<String>,
+    pub sort: Vec<String>,
+    pub foldlevel: Option<usize>,
 }
 
 impl Config {
@@ -86,6 +178,8 @@ impl Config {
             default_view: None,
             images: false,
             proxy: None,
+            sort: Vec::new(),
+            foldlevel: None,
             config_dir: config_dir.clone(),
         };
 
@@ -118,6 +212,10 @@ impl Config {
         if let Some(v) = raw.theme {
             self.theme_path = Some(PathBuf::from(v));
         }
+        if let Some(v) = raw.sort {
+            self.sort = v.into_iter().take(3).collect();
+        }
+        self.foldlevel = raw.foldlevel;
         if let Some(v) = raw.pane_ratio {
             if v.len() == 3 {
                 self.pane_ratio = [v[0], v[1], v[2]];
@@ -286,5 +384,56 @@ mod tests {
     #[test]
     fn missing_file_none() {
         assert!(load_raw(&std::path::Path::new("/nonexistent/config")).is_none());
+    }
+}
+
+#[cfg(test)]
+mod advanced_tests {
+    use super::*;
+
+    fn load_from(text: &str, name: &str) -> Option<RawConfig> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "markerss-cfg2-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&dir).ok();
+        let path = dir.join(name);
+        std::fs::write(&path, text).ok();
+        let r = load_raw(&path);
+        std::fs::remove_dir_all(&dir).ok();
+        r
+    }
+
+    #[test]
+    fn sort_and_foldlevel_parsed() {
+        let r = load_from("sort = [\"unread\", \"time\"]\nfoldlevel = 1\n", "config.toml").unwrap();
+        assert_eq!(r.sort, Some(vec!["unread".to_string(), "time".to_string()]));
+        assert_eq!(r.foldlevel, Some(1));
+    }
+
+    #[test]
+    fn sort_capped_at_three() {
+        let r = load_from("sort = [\"a\", \"b\", \"c\", \"d\"]\n", "config.toml").unwrap();
+        let mut cfg = Config::load();
+        if let Some(v) = r.sort {
+            cfg.sort = v.into_iter().take(3).collect();
+        }
+        assert_eq!(cfg.sort.len(), 3);
+    }
+
+    #[test]
+    fn theme_colors_load() {
+        let dir = std::env::temp_dir().join(format!("markerss-theme-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).ok();
+        let path = dir.join("theme.toml");
+        std::fs::write(&path, "accent = \"green\"\nh1 = \"red\"\ncode = \"cyan\"\n").ok();
+        let t = ThemeColors::load(Some(&path));
+        assert_eq!(t.accent, Color::Green);
+        assert_eq!(t.md.h1.fg, Some(Color::Red));
+        assert_eq!(t.md.inline_code.fg, Some(Color::Cyan));
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
