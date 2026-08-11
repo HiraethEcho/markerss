@@ -121,6 +121,15 @@ impl App {
                     self.delete_selected_feed();
                 } else {
                     self.delete_armed = true;
+                    let name = self
+                        .tree_rows
+                        .get(self.tree_sel)
+                        .map(|r| match r {
+                            TreeRow::Feed(_, n, _) => n.clone(),
+                            _ => String::new(),
+                        })
+                        .unwrap_or_default();
+                    self.status = format!("press d again to delete {name}");
                 }
             }
             Action::Rename if self.focus == 0 => {
@@ -244,7 +253,7 @@ impl App {
             KeyCode::Char('h') | KeyCode::Char('q') | KeyCode::Esc => self.go_left(),
             // right: l / enter — expand tree→list→article→fetch full
             KeyCode::Char('l') | KeyCode::Enter => self.go_right(),
-            KeyCode::Char('Q') => self.running = false,
+            KeyCode::Char('Q') => self.execute_action(Action::Quit),
             // y-prefix: yy item url, yn item title, yf feed url
             KeyCode::Char('y') => {
                 if self.pending_y {
@@ -279,18 +288,15 @@ impl App {
                     self.status = "copied feed url".into();
                 }
             }
-            // r: partial refresh (fetch new unread, append); R: refresh all (rebuild)
-            KeyCode::Char('r') => self.refresh_all(false),
-            KeyCode::Char('R') => self.refresh_all(true),
-            // a: toggle read of the current item; A: mark all in view read
-            KeyCode::Char('a') => self.toggle_read(),
-            KeyCode::Char('A') => self.mark_all_read(),
-            KeyCode::Char('e') => self.start_export(),
-            KeyCode::Char('o') => self.open_browser(),
+            KeyCode::Char('r') => self.execute_action(Action::Refresh),
+            KeyCode::Char('R') => self.execute_action(Action::RefreshAll),
+            KeyCode::Char('a') => self.execute_action(Action::ToggleRead),
+            KeyCode::Char('A') => self.execute_action(Action::MarkAllRead),
+            KeyCode::Char('e') => self.execute_action(Action::Export),
+            KeyCode::Char('o') => self.execute_action(Action::Browser),
             KeyCode::Char('t') if self.focus == 0 => self.cycle_preset(),
-            // L / S: item flags from list or article pane (toggle; again to cancel)
-            KeyCode::Char('L') if self.focus >= 1 => self.toggle_item_flag("read_later"),
-            KeyCode::Char('S') if self.focus >= 1 => self.toggle_item_flag("saved"),
+            KeyCode::Char('L') if self.focus >= 1 => self.execute_action(Action::ReadLater),
+            KeyCode::Char('S') if self.focus >= 1 => self.execute_action(Action::Saved),
             // gg / G: jump top / bottom (nav + list + article)
             KeyCode::Char('g') => {
                 if self.pending_g {
@@ -318,17 +324,14 @@ impl App {
                 _ => {}
             },
             // F: nav → favourite feed; article → fullscreen
-            KeyCode::Char('F') if self.focus == 0 => self.toggle_favourite_feed(),
+            KeyCode::Char('F') if self.focus == 0 => self.execute_action(Action::Favourite),
             KeyCode::Char('F') if self.focus == 2 => {
                 self.fullscreen = !self.fullscreen;
             }
-            KeyCode::Char('f') if self.focus == 0 => self.toggle_favourite_feed(),
-            KeyCode::Char('?') => self.show_help = true,
+            KeyCode::Char('f') if self.focus == 0 => self.execute_action(Action::Favourite),
+            KeyCode::Char('?') => self.execute_action(Action::Help),
             // / — modal list search (live filter; enter keeps, esc restores)
-            KeyCode::Char('/') if self.focus == 1 => {
-                self.search_base = Some(self.scoped_items.clone());
-                self.start_input(InputMode::Search);
-            }
+            KeyCode::Char('/') if self.focus == 1 => self.execute_action(Action::Search),
             // s-prefix: sort levels — lowercase = forward, uppercase = reverse
             // st/sn/sf/su: time/title/feed/unread · sT/sN/sF/sU: reversed
             KeyCode::Char('s') if self.focus == 1 => {
@@ -370,43 +373,14 @@ impl App {
                 self.pending_s = false;
                 self.push_sort("unread", true);
             }
-            KeyCode::Tab => self.focus = (self.focus + 1) % 3,
+            KeyCode::Tab => self.execute_action(Action::FocusNext),
             KeyCode::BackTab => self.focus = (self.focus + 2) % 3,
-            KeyCode::Char('N') if self.focus == 0 => self.start_input(InputMode::AddUrl),
-            KeyCode::Char('d') if self.focus == 0 => {
-                if self.delete_armed {
-                    self.delete_armed = false;
-                    self.delete_selected_feed();
-                } else {
-                    self.delete_armed = true;
-                    let name = self
-                        .tree_rows
-                        .get(self.tree_sel)
-                        .map(|r| match r {
-                            TreeRow::Feed(_, n, _) => n.clone(),
-                            _ => String::new(),
-                        })
-                        .unwrap_or_default();
-                    self.status = format!("press d again to delete {name}");
-                }
-            }
+            KeyCode::Char('N') if self.focus == 0 => self.execute_action(Action::NewFeed),
+            KeyCode::Char('d') if self.focus == 0 => self.execute_action(Action::Delete),
             // M: rename — category / tag / feed custom title
-            KeyCode::Char('M') if self.focus == 0 => match self.tree_rows.get(self.tree_sel) {
-                Some(TreeRow::Category(_)) => self.start_input(InputMode::RenameCategory),
-                Some(TreeRow::Tag(_)) => self.start_input(InputMode::EditTag),
-                Some(TreeRow::Feed(url, _, _)) => {
-                    self.edit_tags_url = Some(url.clone());
-                    self.start_input(InputMode::EditFeedTitle);
-                }
-                _ => {}
-            },
+            KeyCode::Char('M') if self.focus == 0 => self.execute_action(Action::Rename),
             // T: edit tags of the selected feed (nav)
-            KeyCode::Char('T') if self.focus == 0 => {
-                if let Some(TreeRow::Feed(url, _, _)) = self.tree_rows.get(self.tree_sel).cloned() {
-                    self.edit_tags_url = Some(url);
-                    self.start_input(InputMode::EditTags);
-                }
-            }
+            KeyCode::Char('T') if self.focus == 0 => self.execute_action(Action::EditTags),
             KeyCode::Char('i') => self.start_input(InputMode::ImportOpml),
             KeyCode::Char('x') => self.export_opml(),
             _ => match self.focus {
