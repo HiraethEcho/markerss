@@ -117,6 +117,7 @@ struct App {
     sort_stack: Vec<(String, bool)>,
     search_base: Option<Vec<(String, Item)>>,
     keymap: std::collections::HashMap<KeyCode, crate::keys::Action>,
+    feed_errors: std::collections::HashMap<String, String>,
     input: Option<InputPrompt>,
     add_pending: Option<String>,
     add_pending_title: Option<String>,
@@ -183,6 +184,7 @@ impl App {
             sort_stack,
             search_base: None,
             keymap,
+            feed_errors: std::collections::HashMap::new(),
             input: None,
             add_pending: None,
             add_pending_title: None,
@@ -795,6 +797,7 @@ impl App {
         self.pending_refreshes = self.pending_refreshes.saturating_sub(1);
         match result {
             Ok(mut items) => {
+                self.feed_errors.remove(&url);
                 if let Some(cap) = self.cfg.max_items_per_feed {
                     items.truncate(cap);
                 }
@@ -811,7 +814,10 @@ impl App {
                     self.refresh_snapshot_content(&url);
                 }
             }
-            Err(e) => self.status = e,
+            Err(e) => {
+                self.status = e.clone();
+                self.feed_errors.insert(url.clone(), e);
+            }
         }
         if self.pending_refreshes == 0 {
             self.status.push_str(" — done");

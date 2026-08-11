@@ -83,12 +83,23 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                 (format!("Saved ({n})"), Style::default().add_modifier(Modifier::BOLD))
             }
             TreeRow::Favourite => {
-                let n = app.feeds.feeds.iter().filter(|f| f.favourite).count();
+                let n: usize = app
+                    .feeds
+                    .feeds
+                    .iter()
+                    .filter(|f| f.favourite)
+                    .map(|f| app.db.unread_count(&f.url).unwrap_or(0))
+                    .sum();
                 let prefix = if app.fav_expanded { "▾" } else { "▸" };
                 (format!("{prefix} Favourite ({n})"), Style::default().add_modifier(Modifier::BOLD))
             }
             TreeRow::Uncategorized => {
-                let n = app.feeds.uncategorized().len();
+                let n: usize = app
+                    .feeds
+                    .uncategorized()
+                    .iter()
+                    .map(|f| app.db.unread_count(&f.url).unwrap_or(0))
+                    .sum();
                 let prefix = if app.uncat_expanded { "▾" } else { "▸" };
                 (
                     format!("{prefix} No Category ({n})"),
@@ -104,7 +115,11 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                 let n = f
                     .map(|x| app.db.unread_count(&x.url).unwrap_or(0))
                     .unwrap_or(0);
-                (format!("  {name} ({n})"), Style::default())
+                let mark = f
+                    .filter(|x| app.feed_errors.contains_key(&x.url))
+                    .map(|_| " !")
+                    .unwrap_or("");
+                (format!("  {name} ({n}){mark}"), Style::default())
             }
             TreeRow::Category(cat) => {
                 let n: usize = app
@@ -119,15 +134,20 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
             }
             TreeRow::Feed(url, name, indent) => {
                 let n = app.db.unread_count(url).unwrap_or(0);
-                (format!("{}{} ({n})", " ".repeat(*indent as usize), name), Style::default())
+                let mark = if app.feed_errors.contains_key(url.as_str()) { " !" } else { "" };
+                (
+                    format!("{}{} ({n}){mark}", " ".repeat(*indent as usize), name),
+                    Style::default(),
+                )
             }
             TreeRow::Tag(t) => {
-                let n = app
+                let n: usize = app
                     .feeds
                     .feeds
                     .iter()
                     .filter(|f| f.has_tag(t))
-                    .count();
+                    .map(|f| app.db.unread_count(&f.url).unwrap_or(0))
+                    .sum();
                 let prefix = if app.collapsed.contains(&format!("tag:{t}")) {
                     "▸"
                 } else {
