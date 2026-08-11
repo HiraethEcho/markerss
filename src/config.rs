@@ -196,7 +196,7 @@ impl Config {
             self.cache_ttl_days = v;
         }
         if let Some(v) = raw.export_dir {
-            self.export_dir = PathBuf::from(v);
+            self.export_dir = expand_tilde(&v);
         }
         self.browser = raw.browser;
         if let Some(v) = raw.refresh {
@@ -212,7 +212,7 @@ impl Config {
         }
         self.max_items_per_feed = raw.max_items_per_feed;
         if let Some(v) = raw.theme {
-            self.theme_path = Some(PathBuf::from(v));
+            self.theme_path = Some(expand_tilde(&v));
         }
         if let Some(v) = raw.sort {
             self.sort = v.into_iter().take(3).collect();
@@ -237,6 +237,16 @@ impl Config {
         }
         self.proxy = raw.proxy;
     }
+}
+
+/// Expand a leading `~` to the home directory (no-op otherwise).
+fn expand_tilde(p: &str) -> PathBuf {
+    if let Some(rest) = p.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home).join(rest);
+        }
+    }
+    PathBuf::from(p)
 }
 
 /// Parse the config file by extension; `None` when unreadable/absent.

@@ -26,7 +26,11 @@ pub(crate) fn render(frame: &mut Frame, app: &mut App) {
         }
         return;
     }
-    let r = app.cfg.pane_ratio;
+    let r = [
+        app.cfg.pane_ratio[0].max(0.0),
+        app.cfg.pane_ratio[1].max(0.0),
+        app.cfg.pane_ratio[2].max(0.0),
+    ];
     let [nav, list, article] = Layout::horizontal([
         Constraint::Percentage((r[0] * 100.0) as u16),
         Constraint::Percentage((r[1] * 100.0) as u16),
@@ -274,6 +278,37 @@ fn render_article_text(app: &App, item: &Item) -> ratatui::text::Text<'static> {
     the_other_tui_markdown::into_text_with_renderer(&md, &renderer)
 }
 
+/// Header text: title / meta (feed · date · read · flags) / url / summary.
+fn article_header<'a>(app: &App, url: &str, item: &'a Item, feed_name: &'a str) -> Text<'a> {
+    let title_style = Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD);
+    let meta_style = Style::default().fg(app.theme.dim);
+    let dim_style = Style::default().fg(app.theme.dim);
+    let read_mark = if app.db.is_read(url, &item.guid).unwrap_or(false) {
+        "read"
+    } else {
+        "unread"
+    };
+    let flags_mark = if item.saved && item.read_later {
+        " [SL]"
+    } else if item.saved {
+        " [S]"
+    } else if item.read_later {
+        " [L]"
+    } else {
+        ""
+    };
+    Text::from(vec![
+        Line::from(Span::styled(item.display_title().to_string(), title_style)),
+        Line::from(Span::styled(
+            format!("{feed_name}  ·  {}  ·  {read_mark}{flags_mark}", fmt_date(&item.date)),
+            meta_style,
+        )),
+        Line::from(Span::styled(item.url.clone(), dim_style)),
+        Line::from(""),
+        Line::from(Span::styled(item.summary.trim(), Style::default())),
+    ])
+}
+
 fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     let Some((url, item)) = app.current_item() else {
         frame.render_widget(
@@ -314,34 +349,7 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     ])
     .areas(inner);
 
-    let title_style = Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD);
-    let meta_style = Style::default().fg(app.theme.dim);
-    let dim_style = Style::default().fg(app.theme.dim);
-    let read_mark = if app.db.is_read(&url, &item.guid).unwrap_or(false) {
-        "read"
-    } else {
-        "unread"
-    };
-    let flags_mark = if item.saved && item.read_later {
-        " [SL]"
-    } else if item.saved {
-        " [S]"
-    } else if item.read_later {
-        " [L]"
-    } else {
-        ""
-    };
-
-    let header_text = Text::from(vec![
-        Line::from(Span::styled(item.display_title(), title_style)),
-        Line::from(Span::styled(
-            format!("{feed_name}  ·  {}  ·  {read_mark}{flags_mark}", fmt_date(&item.date)),
-            meta_style,
-        )),
-        Line::from(Span::styled(item.url.clone(), dim_style)),
-        Line::from(""),
-        Line::from(Span::styled(item.summary.trim(), Style::default())),
-    ]);
+    let header_text = article_header(app, &url, &item, feed_name.as_str());
     frame.render_widget(Paragraph::new(header_text).wrap(Wrap { trim: true }), head);
 
     frame.render_widget(
@@ -356,20 +364,12 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     // (eilmeldung-style pipeline: html2md + the_other_tui_markdown).
     // Links render as underlined alt text (no URL); images as [img].
     let body_text = if content_ready {
-        // reuse the rendered body when the item hasn't changed
-        if let Some((g, t)) = &app.article_render {
-            if g == &item.guid {
-                t.clone()
-            } else {
-                let t = render_article_text(app, &item);
-                app.article_render = Some((item.guid.clone(), t.clone()));
-                t
-            }
-        } else {
+        // render once per guid; reuse until the item's content changes
+        if !matches!(&app.article_render, Some((g, _)) if g == &item.guid) {
             let t = render_article_text(app, &item);
             app.article_render = Some((item.guid.clone(), t.clone()));
-            t
         }
+        app.article_render.as_ref().map(|(_, t)| t.clone()).unwrap_or_default()
     } else if app.fetching {
         Text::from("fetching…")
     } else if in_article {

@@ -332,6 +332,16 @@ impl App {
         }
     }
 
+    /// Drop any active search when the scope changes (its base snapshot is stale).
+    fn clear_search(&mut self) {
+        self.search_base = None;
+        if let Some(p) = &self.input {
+            if p.mode == InputMode::Search {
+                self.input = None;
+            }
+        }
+    }
+
     fn select_scope(&mut self, row: &TreeRow) {
         if matches!(row, TreeRow::Section(_)) {
             return;
@@ -349,6 +359,7 @@ impl App {
             TreeRow::Favourite | TreeRow::Uncategorized => Scope::AllUnread,
         };
         self.list_sel = 0;
+        self.clear_search();
         self.rebuild_list();
         self.focus = 1;
     }
@@ -427,6 +438,7 @@ impl App {
         self.scoped_items = items;
         // explicit sort stack (st/sn/sf/su) re-orders the snapshot on demand
         self.apply_sort();
+        self.reapply_search_filter();
         if self.list_sel >= self.scoped_items.len() {
             self.list_sel = self.scoped_items.len().saturating_sub(1);
         }
@@ -887,6 +899,7 @@ impl App {
         if !fresh.is_empty() {
             self.scoped_items.splice(0..0, fresh);
         }
+        self.reapply_search_filter();
     }
 
     fn handle_article_fetched(&mut self, url: String, guid: String, result: Result<String, String>) {

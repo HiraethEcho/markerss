@@ -99,6 +99,14 @@ pub(crate) fn build_keymap(
 }
 
 impl App {
+    /// Reset prefix-key and delete-armed state (help/input/ctrl paths return early).
+    fn clear_pending(&mut self) {
+        self.pending_g = false;
+        self.pending_s = false;
+        self.pending_y = false;
+        self.delete_armed = false;
+    }
+
     /// Execute a remapped action (user keybindings). Guards per pane.
     fn execute_action(&mut self, action: Action) {
         match action {
@@ -189,6 +197,7 @@ impl App {
                 }
                 _ => {}
             }
+            self.clear_pending();
             return;
         }
         if let Some(mut prompt) = self.input.take() {
@@ -226,12 +235,17 @@ impl App {
                     self.input = Some(prompt);
                 }
             }
+            self.clear_pending();
             return;
         }
-        // user keybindings: remapped key → action (defaults still work)
-        if let Some(&action) = self.keymap.get(&key) {
-            self.execute_action(action);
-            return;
+        // user keybindings: remapped key → action (defaults still work);
+        // never intercept ctrl chords (ctrl+u/d/f/b keep their meaning)
+        if !mods.contains(KeyModifiers::CONTROL) {
+            if let Some(&action) = self.keymap.get(&key) {
+                self.clear_pending();
+                self.execute_action(action);
+                return;
+            }
         }
         // ctrl+u / ctrl+d half-page (article); ctrl+f/b full page (list+article)
         if mods.contains(KeyModifiers::CONTROL) {
@@ -243,6 +257,7 @@ impl App {
                 _ if self.focus == 2 => self.article_scroll_ctrl(key),
                 _ => {}
             }
+            self.clear_pending();
             return;
         }
         if key != KeyCode::Char('d') {
@@ -713,7 +728,7 @@ impl App {
     }
 
     /// Apply the current search query to the snapshot taken when `/` opened.
-    fn apply_search_filter(&mut self, q: &str) {
+    pub(crate) fn apply_search_filter(&mut self, q: &str) {
         let Some(base) = &self.search_base else { return };
         let q = q.trim().to_lowercase();
         if q.is_empty() {
@@ -730,6 +745,18 @@ impl App {
         }
         self.list_sel = 0;
         self.article_scroll = 0;
+    }
+
+    /// Re-run the active search filter after list mutations (append/rebuild).
+    pub(crate) fn reapply_search_filter(&mut self) {
+        if self.search_base.is_some() {
+            if let Some(p) = &self.input {
+                if p.mode == InputMode::Search {
+                    let q = p.buf.clone();
+                    self.apply_search_filter(&q);
+                }
+            }
+        }
     }
 
     /// Esc from the search box — restore the pre-search list.
