@@ -1106,19 +1106,6 @@ impl App {
             }
             return;
         }
-        // any key other than g/z/y/s/d disarms the prefix keys + delete-confirm
-        if key != KeyCode::Char('g') {
-            self.pending_g = false;
-        }
-        if key != KeyCode::Char('z') {
-            self.pending_z = false;
-        }
-        if key != KeyCode::Char('y') {
-            self.pending_y = false;
-        }
-        if key != KeyCode::Char('s') {
-            self.pending_s = false;
-        }
         if key != KeyCode::Char('d') {
             self.delete_armed = false;
         }
@@ -1161,23 +1148,23 @@ impl App {
                     self.status = "copied feed url".into();
                 }
             }
-            // zr/zm/zR/zM: fold control (nav) — must precede global r/R
-            KeyCode::Char('z') if self.focus == 0 => {
+            // zr/zm/zR/zM: fold control — must precede global r/R
+            KeyCode::Char('z') => {
                 self.pending_z = !self.pending_z;
             }
-            KeyCode::Char('r') if self.focus == 0 && self.pending_z => {
+            KeyCode::Char('r') if self.pending_z => {
                 self.pending_z = false;
                 self.nav_z_fold(1);
             }
-            KeyCode::Char('m') if self.focus == 0 && self.pending_z => {
+            KeyCode::Char('m') if self.pending_z => {
                 self.pending_z = false;
                 self.nav_z_fold(-1);
             }
-            KeyCode::Char('R') if self.focus == 0 && self.pending_z => {
+            KeyCode::Char('R') if self.pending_z => {
                 self.pending_z = false;
                 self.nav_z_fold_all(true);
             }
-            KeyCode::Char('M') if self.focus == 0 && self.pending_z => {
+            KeyCode::Char('M') if self.pending_z => {
                 self.pending_z = false;
                 self.nav_z_fold_all(false);
             }
@@ -1232,7 +1219,7 @@ impl App {
                 self.start_input(InputMode::Search);
             }
             // s-prefix: st/sn/sf/su sort levels; ss toggles reverse
-            KeyCode::Char('s') if self.focus == 1 && self.pending_s => {
+            KeyCode::Char('s') if self.pending_s && self.focus == 1 => {
                 self.pending_s = false;
                 self.sort_reverse = !self.sort_reverse;
                 self.rebuild_list();
@@ -1241,19 +1228,19 @@ impl App {
             KeyCode::Char('s') if self.focus == 1 => {
                 self.pending_s = !self.pending_s;
             }
-            KeyCode::Char('t') if self.focus == 1 && self.pending_s => {
+            KeyCode::Char('t') if self.pending_s && self.focus == 1 => {
                 self.pending_s = false;
                 self.push_sort("time");
             }
-            KeyCode::Char('n') if self.focus == 1 && self.pending_s => {
+            KeyCode::Char('n') if self.pending_s && self.focus == 1 => {
                 self.pending_s = false;
                 self.push_sort("title");
             }
-            KeyCode::Char('f') if self.focus == 1 && self.pending_s => {
+            KeyCode::Char('f') if self.pending_s && self.focus == 1 => {
                 self.pending_s = false;
                 self.push_sort("feed");
             }
-            KeyCode::Char('u') if self.focus == 1 && self.pending_s => {
+            KeyCode::Char('u') if self.pending_s && self.focus == 1 => {
                 self.pending_s = false;
                 self.push_sort("unread");
             }
@@ -1302,6 +1289,16 @@ impl App {
                 2 => self.article_key(key),
                 _ => {}
             },
+        }
+        // post-match: disarm pending prefixes (combos already consumed+cleared)
+        match key {
+            KeyCode::Char('g') | KeyCode::Char('z') | KeyCode::Char('s') | KeyCode::Char('y') => {}
+            _ => {
+                self.pending_g = false;
+                self.pending_z = false;
+                self.pending_s = false;
+                self.pending_y = false;
+            }
         }
     }
 
