@@ -34,6 +34,21 @@ pub(crate) enum Action {
     PrevUnread,
     ParentNext,
     ParentPrev,
+    CopyItemUrl,
+    CopyItemTitle,
+    CopyFeedUrl,
+    SortTime,
+    SortTitle,
+    SortFeed,
+    SortUnread,
+    SortTimeRev,
+    SortTitleRev,
+    SortFeedRev,
+    SortUnreadRev,
+    FocusPrev,
+    CyclePreset,
+    ImportOpml,
+    ExportOpml,
 }
 
 impl Action {
@@ -65,6 +80,21 @@ impl Action {
             "prev_unread" => Action::PrevUnread,
             "parent_next" => Action::ParentNext,
             "parent_prev" => Action::ParentPrev,
+            "copy_item_url" => Action::CopyItemUrl,
+            "copy_item_title" => Action::CopyItemTitle,
+            "copy_feed_url" => Action::CopyFeedUrl,
+            "sort_time" => Action::SortTime,
+            "sort_title" => Action::SortTitle,
+            "sort_feed" => Action::SortFeed,
+            "sort_unread" => Action::SortUnread,
+            "sort_time_rev" => Action::SortTimeRev,
+            "sort_title_rev" => Action::SortTitleRev,
+            "sort_feed_rev" => Action::SortFeedRev,
+            "sort_unread_rev" => Action::SortUnreadRev,
+            "focus_prev" => Action::FocusPrev,
+            "cycle_preset" => Action::CyclePreset,
+            "import_opml" => Action::ImportOpml,
+            "export_opml" => Action::ExportOpml,
             _ => return None,
         })
     }
@@ -89,18 +119,36 @@ impl Action {
             _ => return None,
         })
     }
+
+    /// Parse a key sequence string → Vec<KeyCode>: `"gg"` → [g, g],
+    /// `"<enter>"` → [Enter], `"l"` → [l]. Sequences are at most 2 keys.
+    pub(crate) fn parse_seq(s: &str) -> Option<Vec<KeyCode>> {
+        let t = s.trim();
+        if t.starts_with('<') {
+            return Action::parse_key(t).map(|k| vec![k]);
+        }
+        let chars: Vec<char> = t.chars().collect();
+        if chars.is_empty() || chars.len() > 2 {
+            return None;
+        }
+        let mut out = Vec::with_capacity(chars.len());
+        for c in chars {
+            out.push(KeyCode::Char(c));
+        }
+        Some(out)
+    }
 }
 
 /// Build the user keymap: key → action (invalid entries skipped).
 pub(crate) fn build_keymap(
     raw: &std::collections::HashMap<String, Vec<String>>,
-) -> std::collections::HashMap<KeyCode, Action> {
+) -> std::collections::HashMap<Vec<KeyCode>, Action> {
     let mut map = std::collections::HashMap::new();
     for (action, keys) in raw {
         let Some(a) = Action::from_str(action) else { continue };
         for key in keys {
-            if let Some(k) = Action::parse_key(key) {
-                map.insert(k, a);
+            if let Some(seq) = Action::parse_seq(key) {
+                map.insert(seq, a);
             }
         }
     }
@@ -110,9 +158,7 @@ pub(crate) fn build_keymap(
 impl App {
     /// Reset prefix-key and delete-armed state (help/input/ctrl paths return early).
     fn clear_pending(&mut self) {
-        self.pending_g = false;
-        self.pending_s = false;
-        self.pending_y = false;
+        self.pending_keys.clear();
         self.delete_armed = false;
     }
 
@@ -129,6 +175,9 @@ impl App {
             Action::Export => self.start_export(),
             Action::Browser => self.open_browser(),
             Action::Favourite if self.focus == 0 => self.toggle_favourite_feed(),
+            Action::Favourite if self.focus == 2 => {
+                self.fullscreen = !self.fullscreen;
+            }
             Action::ReadLater if self.focus >= 1 => self.toggle_item_flag("read_later"),
             Action::Saved if self.focus >= 1 => self.toggle_item_flag("saved"),
             Action::NewFeed if self.focus == 0 => self.start_input(InputMode::AddUrl),
@@ -192,8 +241,8 @@ impl App {
                 2 => self.article_scroll = u16::MAX,
                 _ => {}
             },
-            Action::NextUnread => self.mark_read_and_jump(1),
-            Action::PrevUnread => self.mark_read_and_jump(-1),
+            Action::NextUnread if self.focus == 1 => self.mark_read_and_jump(1),
+            Action::PrevUnread if self.focus == 1 => self.mark_read_and_jump(-1),
             // parent navigation: article → list cursor, list → nav cursor
             Action::ParentNext => match self.focus {
                 2 => self.move_list_sel(1),
@@ -205,6 +254,43 @@ impl App {
                 1 => self.move_nav_sel(-1),
                 _ => {}
             },
+            Action::CopyItemUrl if self.focus >= 1 => {
+                if let Some((_, item)) = self.current_item() {
+                    copy_to_clipboard(&item.url);
+                    self.status = "copied item url".into();
+                }
+            }
+            Action::CopyItemTitle if self.focus >= 1 => {
+                if let Some((_, item)) = self.current_item() {
+                    copy_to_clipboard(item.display_title());
+                    self.status = "copied item title".into();
+                }
+            }
+            Action::CopyFeedUrl => {
+                let url = match self.focus {
+                    0 => self.tree_rows.get(self.tree_sel).and_then(|r| match r {
+                        TreeRow::Feed(u, _, _) | TreeRow::FavouriteFeed(u, _) | TreeRow::UncategorizedFeed(u, _) => Some(u.clone()),
+                        _ => None,
+                    }),
+                    _ => self.current_item().map(|(u, _)| u),
+                };
+                if let Some(u) = url {
+                    copy_to_clipboard(&u);
+                    self.status = "copied feed url".into();
+                }
+            }
+            Action::SortTime if self.focus == 1 => self.push_sort("time", false),
+            Action::SortTitle if self.focus == 1 => self.push_sort("title", false),
+            Action::SortFeed if self.focus == 1 => self.push_sort("feed", false),
+            Action::SortUnread if self.focus == 1 => self.push_sort("unread", false),
+            Action::SortTimeRev if self.focus == 1 => self.push_sort("time", true),
+            Action::SortTitleRev if self.focus == 1 => self.push_sort("title", true),
+            Action::SortFeedRev if self.focus == 1 => self.push_sort("feed", true),
+            Action::SortUnreadRev if self.focus == 1 => self.push_sort("unread", true),
+            Action::FocusPrev => self.focus = (self.focus + 2) % 3,
+            Action::CyclePreset if self.focus == 0 => self.cycle_preset(),
+            Action::ImportOpml => self.start_input(InputMode::ImportOpml),
+            Action::ExportOpml => self.export_opml(),
             _ => {}
         }
     }
@@ -286,16 +372,7 @@ impl App {
             self.clear_pending();
             return;
         }
-        // user keybindings: remapped key → action (defaults still work);
-        // never intercept ctrl chords (ctrl+u/d/f/b keep their meaning)
-        if !mods.contains(KeyModifiers::CONTROL) {
-            if let Some(&action) = self.keymap.get(&key) {
-                self.clear_pending();
-                self.execute_action(action);
-                return;
-            }
-        }
-        // ctrl+u / ctrl+d half-page (article); ctrl+f/b full page (list+article)
+        // ctrl chords are never buffered/rebindable
         if mods.contains(KeyModifiers::CONTROL) {
             match key {
                 KeyCode::Char('f') | KeyCode::Char('b') if self.focus >= 1 => {
@@ -308,166 +385,40 @@ impl App {
             self.clear_pending();
             return;
         }
-        if key != KeyCode::Char('d') {
-            self.delete_armed = false;
+        // combo/key buffer: accumulate key presses and match the longest
+        // bound sequence (single keys and combos like gg / st / yy live in
+        // the same map). Ctrl chords are handled above and never buffered.
+        self.pending_keys.push(key);
+        if self.pending_keys.len() > 2 {
+            self.pending_keys.remove(0);
         }
-        match key {
-            // left: h / q / esc — article→list→nav→parent in tree
-            KeyCode::Char('h') | KeyCode::Char('q') | KeyCode::Esc | KeyCode::Left => self.go_left(),
-            // right: l / enter — expand tree→list→article→fetch full
-            KeyCode::Char('l') | KeyCode::Enter | KeyCode::Right => self.go_right(),
-            KeyCode::Char('Q') => self.execute_action(Action::Quit),
-            // y-prefix: yy item url, yn item title, yf feed url
-            KeyCode::Char('y') => {
-                if self.pending_y {
-                    self.pending_y = false;
-                    if let Some((_, item)) = self.current_item() {
-                        copy_to_clipboard(&item.url);
-                        self.status = "copied item url".into();
-                    }
-                } else {
-                    self.pending_y = true;
-                    self.status = "copy: yy item url · yn item title · yf feed url".into();
-                }
-            }
-            KeyCode::Char('n') if self.pending_y => {
-                self.pending_y = false;
-                if let Some((_, item)) = self.current_item() {
-                    copy_to_clipboard(item.display_title());
-                    self.status = "copied item title".into();
-                }
-            }
-            KeyCode::Char('f') if self.pending_y => {
-                self.pending_y = false;
-                let url = match self.focus {
-                    0 => self.tree_rows.get(self.tree_sel).and_then(|r| match r {
-                        TreeRow::Feed(u, _, _) | TreeRow::FavouriteFeed(u, _) | TreeRow::UncategorizedFeed(u, _) => Some(u.clone()),
-                        _ => None,
-                    }),
-                    _ => self.current_item().map(|(u, _)| u),
-                };
-                if let Some(u) = url {
-                    copy_to_clipboard(&u);
-                    self.status = "copied feed url".into();
-                }
-            }
-            KeyCode::Char('r') => self.execute_action(Action::Refresh),
-            KeyCode::Char('R') => self.execute_action(Action::RefreshAll),
-            KeyCode::Char('a') => self.execute_action(Action::ToggleRead),
-            KeyCode::Char('A') => self.execute_action(Action::MarkAllRead),
-            KeyCode::Char('e') => self.execute_action(Action::Export),
-            KeyCode::Char('o') => self.execute_action(Action::Browser),
-            KeyCode::Char('t') if self.focus == 0 => self.cycle_preset(),
-            KeyCode::Char('L') if self.focus >= 1 => self.execute_action(Action::ReadLater),
-            KeyCode::Char('S') if self.focus >= 1 => self.execute_action(Action::Saved),
-            // gg / G: jump top / bottom (nav + list + article)
-            KeyCode::Char('g') => {
-                if self.pending_g {
-                    self.pending_g = false;
-                    match self.focus {
-                        0 => self.tree_sel = 0,
-                        1 => {
-                            self.list_sel = 0;
-                            self.article_scroll = 0;
-                        }
-                        2 => self.article_scroll = 0,
-                        _ => {}
-                    }
-                } else {
-                    self.pending_g = true;
-                }
-            }
-            // J/K: parent navigation (article → list, list → nav)
-            KeyCode::Char('J') => self.execute_action(Action::ParentNext),
-            KeyCode::Char('K') => self.execute_action(Action::ParentPrev),
-            KeyCode::Char('G') => match self.focus {
-                0 => self.tree_sel = self.tree_rows.len().saturating_sub(1),
-                1 => {
-                    self.list_sel = self.scoped_items.len().saturating_sub(1);
-                    self.article_scroll = 0;
-                }
-                2 => self.article_scroll = u16::MAX, // clamped at render
-                _ => {}
-            },
-            // F: nav → favourite feed; article → fullscreen
-            KeyCode::Char('F') if self.focus == 0 => self.execute_action(Action::Favourite),
-            KeyCode::Char('F') if self.focus == 2 => {
-                self.fullscreen = !self.fullscreen;
-            }
-            KeyCode::Char('f') if self.focus == 0 => self.execute_action(Action::Favourite),
-            KeyCode::Char('?') => self.execute_action(Action::Help),
-            // / — modal list search (live filter; enter keeps, esc restores)
-            KeyCode::Char('/') if self.focus == 1 => self.execute_action(Action::Search),
-            // s-prefix: sort levels — lowercase = forward, uppercase = reverse
-            // st/sn/sf/su: time/title/feed/unread · sT/sN/sF/sU: reversed
-            KeyCode::Char('s') if self.focus == 1 => {
-                self.pending_s = !self.pending_s;
-                if self.pending_s {
-                    self.status =
-                        "sort: st/sn/sf/su (lowercase) or sT/sN/sF/sU (reversed) — time/title/feed/unread".into();
-                }
-            }
-            KeyCode::Char('t') if self.pending_s && self.focus == 1 => {
-                self.pending_s = false;
-                self.push_sort("time", false);
-            }
-            KeyCode::Char('T') if self.pending_s && self.focus == 1 => {
-                self.pending_s = false;
-                self.push_sort("time", true);
-            }
-            KeyCode::Char('n') if self.pending_s && self.focus == 1 => {
-                self.pending_s = false;
-                self.push_sort("title", false);
-            }
-            KeyCode::Char('N') if self.pending_s && self.focus == 1 => {
-                self.pending_s = false;
-                self.push_sort("title", true);
-            }
-            KeyCode::Char('f') if self.pending_s && self.focus == 1 => {
-                self.pending_s = false;
-                self.push_sort("feed", false);
-            }
-            KeyCode::Char('F') if self.pending_s && self.focus == 1 => {
-                self.pending_s = false;
-                self.push_sort("feed", true);
-            }
-            KeyCode::Char('u') if self.pending_s && self.focus == 1 => {
-                self.pending_s = false;
-                self.push_sort("unread", false);
-            }
-            KeyCode::Char('U') if self.pending_s && self.focus == 1 => {
-                self.pending_s = false;
-                self.push_sort("unread", true);
-            }
-            KeyCode::Tab => self.execute_action(Action::FocusNext),
-            KeyCode::BackTab => self.focus = (self.focus + 2) % 3,
-            KeyCode::Char('N') if self.focus == 0 => self.execute_action(Action::NewFeed),
-            KeyCode::Char('d') if self.focus == 0 => self.execute_action(Action::Delete),
-            // M: rename — category / tag / feed custom title
-            KeyCode::Char('M') if self.focus == 0 => self.execute_action(Action::Rename),
-            // T: edit tags of the selected feed (nav)
-            KeyCode::Char('T') if self.focus == 0 => self.execute_action(Action::EditTags),
-            KeyCode::Char('i') => self.start_input(InputMode::ImportOpml),
-            KeyCode::Char('x') => self.export_opml(),
-            _ => match self.focus {
-                0 => self.nav_key(key),
-                1 => self.list_key(key),
-                2 => self.article_key(key),
-                _ => {}
-            },
+        if let Some(&action) = self.keymap.get(&self.pending_keys) {
+            self.clear_pending();
+            self.execute_action(action);
+            return;
         }
-        // post-match: disarm pending prefixes (combos already consumed+cleared)
-        match key {
-            KeyCode::Char('g') | KeyCode::Char('s') | KeyCode::Char('y') => {}
-            _ => {
-                self.pending_g = false;
-                self.pending_s = false;
-                self.pending_y = false;
-            }
+        // a longer bound sequence starts with what we have — keep waiting
+        let is_prefix = self
+            .keymap
+            .keys()
+            .any(|k| k.len() > self.pending_keys.len() && k.starts_with(&self.pending_keys));
+        if is_prefix {
+            return;
+        }
+        // no combo — treat the last key alone (after clearing the buffer)
+        self.clear_pending();
+        if let Some(&action) = self.keymap.get(&vec![key]) {
+            self.execute_action(action);
+            return;
+        }
+        // pane-local keys (j/k movement, scroll, etc.)
+        match self.focus {
+            0 => self.nav_key(key),
+            1 => self.list_key(key),
+            2 => self.article_key(key),
+            _ => {}
         }
     }
-
-    /// Toggle favourite on the selected feed row (persists to urls file).
     fn toggle_favourite_feed(&mut self) {
         let Some(TreeRow::Feed(url, _, _)) = self.tree_rows.get(self.tree_sel).cloned() else {
             return;
@@ -897,11 +848,24 @@ mod tests {
         let mut raw = std::collections::HashMap::new();
         raw.insert("open".to_string(), vec!["o".to_string(), "<enter>".to_string()]);
         raw.insert("bogus".to_string(), vec!["x".to_string()]);
-        raw.insert("help".to_string(), vec!["??".to_string()]);
+        raw.insert("help".to_string(), vec!["xyz".to_string()]);
         let m = build_keymap(&raw);
         assert_eq!(m.len(), 2); // o + enter, both → open
-        assert_eq!(m.get(&KeyCode::Char('o')), Some(&Action::Open));
-        assert_eq!(m.get(&KeyCode::Enter), Some(&Action::Open));
+        assert_eq!(m.get(&vec![KeyCode::Char('o')]), Some(&Action::Open));
+        assert_eq!(m.get(&vec![KeyCode::Enter]), Some(&Action::Open));
+    }
+
+    #[test]
+    fn keymap_combos() {
+        let mut raw = std::collections::HashMap::new();
+        raw.insert("jump_top".to_string(), vec!["gg".to_string()]);
+        raw.insert("sort_time".to_string(), vec!["st".to_string()]);
+        let m = build_keymap(&raw);
+        assert_eq!(m.get(&vec![KeyCode::Char('g'), KeyCode::Char('g')]), Some(&Action::JumpTop));
+        assert_eq!(m.get(&vec![KeyCode::Char('s'), KeyCode::Char('t')]), Some(&Action::SortTime));
+        // case-sensitive: sT ≠ st
+        assert!(m.get(&vec![KeyCode::Char('s'), KeyCode::Char('T')]).is_none());
+        assert!(m.get(&vec![KeyCode::Char('g')]).is_none()); // prefix only
     }
 
     #[test]

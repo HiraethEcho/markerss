@@ -550,7 +550,7 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
 
 fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
     let line = format!(
-        "{}  |  ? help  Q quit  tab focus  j/k move  l/enter open  o browser  e export  a read  A all-read  r fetch  R refresh",
+        "{}  |  ? help  Q quit  F favourite  J/K unread  n/p parent  l/enter open  r fetch  R refresh",
         app.status
     );
     frame.render_widget(Paragraph::new(line), area);
@@ -560,16 +560,16 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
     let text = Text::from(
         "Keys\n\
          ─────\n\
-         nav:   j/k move · h/l expand/collapse+descend · N add feed · d delete · M rename · F favourite\n\
-         list:  j/k move · l/enter open (mark read) · / search (enter keep, left stop) · n/p unread jump\n\
-         article: j/k scroll · n/p item · ctrl+u/d half page · ctrl+f/b full page · l/enter fetch full\n\
+         nav:   j/k move · h/l expand+descend · N new feed · D delete · M rename · F favourite\n\
+         list:  j/k move · l/enter open · / search (enter keep, left stop) · J/K next/prev unread\n\
+         article: j/k scroll · n/p parent (move list) · ctrl+u/d half page · ctrl+f/b full page\n\
          left:  h/q/esc — article→list→nav→parent\n\
          right: l/enter — expand→list→article→fetch\n\
          jump:  gg/G top/bottom (nav+list+article)\n\
          sort:  st/sn/sf/su forward · sT/sN/sF/sU reversed — time/title/feed/unread\n\
-         copy:  yy url · yn title · yf feed url\n\
+         copy:  yy url · yn title · yp feed url\n\
          global: o browser · e export · a read · A all-read · L/S flags · r/R refresh\n\
-         i/x OPML · tab focus · Q quit · ? help\n\n\
+         i/x OPML · t preset · tab focus · Q quit · ? help\n\n\
          export → $XDG_DATA_HOME/markerss/<category>/<slug>.md",
     );
     // floating opaque window, default colors, scrollable with j/k
