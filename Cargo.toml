@@ -11,14 +11,15 @@ reqwest = { version = "0.13.4", features = ["blocking", "json", "gzip"] }
 feed-rs = "2.4.0"
 serde = "1.0.229"
 chrono = "0.4.45"
-html2md = "0.2.15"
 quick-xml = "0.41.0"
 dom_smoothie = "0.18.0"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
-the-other-tui-markdown = "0.1.0"
 regex = "1.13.1"
 toml = "1.1.4"
 serde_json = "1.0.151"
 serde_yaml = "0.9.34"
 ratatui-image = { version = "11.0.6", default-features = false }
 image = "0.25.10"
+h2md = "0.3.1"
+pulldown-cmark = "0.13.4"
+tui-markdown = "0.3.9"

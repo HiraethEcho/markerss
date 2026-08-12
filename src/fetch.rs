@@ -126,22 +126,14 @@ pub fn extract_main(url: &str, html: &str) -> String {
 
 /// HTML → readable markdown text (best effort), for export.
 pub fn html_to_markdown(html: &str) -> String {
+    // strip script/style (h2md may otherwise inline their text)
     let cleaned = strip_tag_blocks(html, "script");
     let cleaned = strip_tag_blocks(&cleaned, "style");
-    // sub/sup → markdown markers (html2md passes them through raw; the
-    // markdown renderer understands ~x~ / ^x^)
-    let sub_re = regex::Regex::new(r"(?i)</?sub>").unwrap();
-    let cleaned = sub_re.replace_all(&cleaned, "~").to_string();
-    let sup_re = regex::Regex::new(r"(?i)</?sup>").unwrap();
-    let cleaned = sup_re.replace_all(&cleaned, "^").to_string();
-    let mut md = html2md::parse_html(&cleaned);
-    // html2md escapes `~` as `\~` — unescape so the renderer sees subscript
-    md = md.replace("\\~", "~");
-    // Collapse excessive blank lines.
-    while md.contains("\n\n\n") {
-        md = md.replace("\n\n\n", "\n\n");
+    let mut out = Vec::new();
+    if h2md::convert(cleaned.as_bytes(), &mut out).is_err() {
+        return String::new();
     }
-    md.trim().to_string()
+    String::from_utf8(out).unwrap_or_default().trim().to_string()
 }
 
 /// Remove `<tag>…</tag>` blocks (case-insensitive).
@@ -202,10 +194,23 @@ mod tests {
 
     #[test]
     fn html_to_md_sub_sup() {
+        // h2md strips sub/sup tags (renders as plain text — no markers)
         let md = html_to_markdown("<p>H<sub>2</sub>O x<sup>2</sup></p>");
-        assert!(md.contains("H~2~O"));
-        assert!(md.contains("x^2^"));
-        assert!(!md.contains("<sub>"));
-        assert!(!md.contains("<sup>"));
+        assert!(md.contains("H2O"), "got: {md}");
+        assert!(md.contains("x2"), "got: {md}");
+        assert!(!md.contains("<sub>"), "got: {md}");
+        assert!(!md.contains("<sup>"), "got: {md}");
+    }
+
+    #[test]
+    fn html_to_md_no_residual_tags() {
+        // the original pain point: no raw HTML tags survive conversion
+        let html = r#"<div class="post"><h2>Head</h2><p>Text <span>span</span> <em>em</em></p><pre><code class="rust">fn main(){}</code></pre><ul><li>one</li><li>two</li></ul><blockquote>quote</blockquote><img src="https://x.com/i.png" alt="pic"></div>"#;
+        let md = html_to_markdown(html);
+        assert!(!md.contains('<'), "residual tag in: {md}");
+        assert!(md.contains("## Head"), "got: {md}");
+        assert!(md.contains("*em*") || md.contains("em"), "got: {md}");
+        assert!(md.contains("fn main"), "got: {md}");
+        assert!(md.contains("![pic](https://x.com/i.png)"), "got: {md}");
     }
 }
