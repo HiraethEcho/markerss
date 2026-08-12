@@ -113,33 +113,51 @@ impl Db {
             let mut fetched_map: std::collections::HashMap<String, String> = Default::default();
             let mut later_map: std::collections::HashSet<String> = Default::default();
             let mut saved_map: std::collections::HashSet<String> = Default::default();
+            // full rows of flagged items — kept even when the feed drops them
+            let mut keep_rows: Vec<Item> = Vec::new();
             {
                 let mut q = tx.prepare(
-                    "SELECT guid, read, content, read_later, saved, fetched_at FROM items WHERE feed_url = ?1",
+                    "SELECT guid, title, url, summary, content, date, read, read_later, saved, fetched_at FROM items WHERE feed_url = ?1",
                 )?;
                 let rows = q.query_map([feed_url], |r| {
                     Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, i64>(1)?,
-                        r.get::<_, String>(2)?,
-                        r.get::<_, i64>(3)?,
-                        r.get::<_, i64>(4)?,
-                        r.get::<_, String>(5)?,
+                        r.get::<_, String>(0)?, // guid
+                        r.get::<_, String>(1)?, // title
+                        r.get::<_, String>(2)?, // url
+                        r.get::<_, String>(3)?, // summary
+                        r.get::<_, String>(4)?, // content
+                        r.get::<_, String>(5)?, // date
+                        r.get::<_, i64>(6)?,   // read
+                        r.get::<_, i64>(7)?,   // read_later
+                        r.get::<_, i64>(8)?,   // saved
+                        r.get::<_, String>(9)?, // fetched_at
                     ))
                 })?;
                 for row in rows.flatten() {
-                    if row.1 != 0 {
+                    if row.6 != 0 {
                         read_guids.insert(row.0.clone());
                     }
-                    if !row.2.is_empty() {
-                        content_map.insert(row.0.clone(), row.2);
-                        fetched_map.insert(row.0.clone(), row.5);
+                    if !row.4.is_empty() {
+                        content_map.insert(row.0.clone(), row.4.clone());
+                        fetched_map.insert(row.0.clone(), row.9);
                     }
-                    if row.3 != 0 {
+                    if row.7 != 0 {
                         later_map.insert(row.0.clone());
                     }
-                    if row.4 != 0 {
-                        saved_map.insert(row.0);
+                    if row.8 != 0 {
+                        saved_map.insert(row.0.clone());
+                    }
+                    if row.7 != 0 || row.8 != 0 {
+                        keep_rows.push(Item {
+                            guid: row.0,
+                            title: row.1,
+                            url: row.2,
+                            summary: row.3,
+                            content: row.4,
+                            date: row.5,
+                            read_later: row.7 != 0,
+                            saved: row.8 != 0,
+                        });
                     }
                 }
             }
@@ -177,6 +195,26 @@ impl Db {
                     later,
                     saved,
                     fetched_at,
+                ])?;
+            }
+            // re-insert flagged items the feed no longer carries (saved /
+            // read-later must survive a full refresh)
+            for k in &keep_rows {
+                if items.iter().any(|i| i.guid == k.guid) {
+                    continue;
+                }
+                ins.execute(rusqlite::params![
+                    feed_url,
+                    k.guid,
+                    k.title,
+                    k.url,
+                    k.summary,
+                    k.content,
+                    k.date,
+                    1,
+                    k.read_later as i64,
+                    k.saved as i64,
+                    now,
                 ])?;
             }
         }

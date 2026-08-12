@@ -185,11 +185,13 @@ impl App {
                         .tree_rows
                         .get(self.tree_sel)
                         .map(|r| match r {
-                            TreeRow::Feed(_, n, _) => n.clone(),
+                            TreeRow::Feed(_, n, _)
+                            | TreeRow::FavouriteFeed(_, n)
+                            | TreeRow::UncategorizedFeed(_, n) => n.clone(),
                             _ => String::new(),
                         })
                         .unwrap_or_default();
-                    self.status = format!("press d again to delete {name}");
+                    self.status = format!("press D again to delete {name}");
                 }
             }
             Action::Rename if self.focus == 0 => {
@@ -409,7 +411,10 @@ impl App {
         }
     }
     fn toggle_favourite_feed(&mut self) {
-        let Some(TreeRow::Feed(url, _, _)) = self.tree_rows.get(self.tree_sel).cloned() else {
+        let Some(url) = self.tree_rows.get(self.tree_sel).and_then(|r| match r {
+            TreeRow::Feed(u, _, _) | TreeRow::FavouriteFeed(u, _) | TreeRow::UncategorizedFeed(u, _) => Some(u.clone()),
+            _ => None,
+        }) else {
             return;
         };
         let new_state = {

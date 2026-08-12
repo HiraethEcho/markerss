@@ -118,27 +118,28 @@ pub fn html_to_markdown(html: &str) -> String {
 
 /// Remove `<tag>…</tag>` blocks (case-insensitive).
 fn strip_tag_blocks(html: &str, tag: &str) -> String {
+    // byte-safe case-insensitive scan: tag names are ASCII, so lowering
+    // A-Z never changes byte length (no to_lowercase offset divergence)
     let mut out = String::with_capacity(html.len());
-    let lower = html.to_lowercase();
     let open = format!("<{tag}");
     let close = format!("</{tag}>");
     let mut rest = html;
-    let mut lo = lower.as_str();
     loop {
-        match lo.find(&open) {
+        match find_ci(rest, &open) {
             Some(i) => {
                 out.push_str(&rest[..i]);
-                // skip past the opening tag's '>'
-                let after_open = &lo[i..];
-                let tag_end = after_open.find('>').map(|j| i + j + 1).unwrap_or(rest.len());
-                let close_off = lo[tag_end..].find(&close);
-                match close_off {
+                let after = &rest[i..];
+                let tag_end = after.find('>').map(|j| i + j + 1).unwrap_or(rest.len());
+                let rest_after_tag = &rest[tag_end..];
+                match find_ci(rest_after_tag, &close) {
                     Some(j) => {
                         let skip = tag_end + j + close.len();
                         rest = &rest[skip.min(rest.len())..];
-                        lo = &lo[skip.min(lo.len())..];
                     }
-                    None => break,
+                    None => {
+                        // unterminated block — keep everything before the opener
+                        return out;
+                    }
                 }
             }
             None => {
@@ -148,6 +149,24 @@ fn strip_tag_blocks(html: &str, tag: &str) -> String {
         }
     }
     out
+}
+
+/// Case-insensitive byte search (ASCII only — length-preserving).
+fn find_ci(haystack: &str, needle: &str) -> Option<usize> {
+    let h = haystack.as_bytes();
+    let n = needle.as_bytes();
+    if n.is_empty() || n.len() > h.len() {
+        return None;
+    }
+    'outer: for i in 0..=h.len() - n.len() {
+        for j in 0..n.len() {
+            if !h[i + j].eq_ignore_ascii_case(&n[j]) {
+                continue 'outer;
+            }
+        }
+        return Some(i);
+    }
+    None
 }
 
 #[cfg(test)]
@@ -180,6 +199,15 @@ mod tests {
         assert!(md.contains("x2"), "got: {md}");
         assert!(!md.contains("<sub>"), "got: {md}");
         assert!(!md.contains("<sup>"), "got: {md}");
+    }
+
+    #[test]
+    fn strip_blocks_cjk_content() {
+        // regression: to_lowercase byte offsets used to panic on non-ASCII
+        let html = "<p>中文内容<script>alert(1)</script>测试</p><style>body{}</style>";
+        let md = html_to_markdown(html);
+        assert!(!md.contains("alert"), "got: {md}");
+        assert!(md.contains("中文内容"), "got: {md}");
     }
 
     #[test]

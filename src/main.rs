@@ -720,7 +720,15 @@ impl App {
     }
 
     fn delete_selected_feed(&mut self) {
-        if let Some(TreeRow::Feed(url, name, _)) = self.tree_rows.get(self.tree_sel).cloned() {
+        let Some((url, name)) = self.tree_rows.get(self.tree_sel).and_then(|r| match r {
+            TreeRow::Feed(u, n, _) | TreeRow::FavouriteFeed(u, n) | TreeRow::UncategorizedFeed(u, n) => {
+                Some((u.clone(), n.clone()))
+            }
+            _ => None,
+        }) else {
+            return;
+        };
+        {
             self.feeds.remove(&url);
             self.save_urls();
             self.rebuild_tree();
@@ -984,13 +992,10 @@ impl App {
     /// Open an arbitrary URL in the configured browser (fallback xdg-open).
     fn open_url(&mut self, url: &str) {
         let cmd = self.cfg.browser.clone().unwrap_or_else(|| "xdg-open".to_string());
-        let _ = std::process::Command::new(&cmd)
-            .arg(url)
-            .spawn()
-            .map_err(|e| {
-                self.status = format!("{cmd} failed: {e}");
-            });
-        self.status = format!("opened {url}");
+        match std::process::Command::new(&cmd).arg(url).spawn() {
+            Ok(_) => self.status = format!("opened {url}"),
+            Err(e) => self.status = format!("{cmd} failed: {e}"),
+        }
     }
 
     /// Start the export flow: prompt with the default filename as placeholder.
