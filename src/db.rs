@@ -253,10 +253,17 @@ impl Db {
     }
 
     pub fn toggle_flag(&mut self, feed_url: &str, guid: &str, flag: &str) -> rusqlite::Result<bool> {
-        let items = self.items_with_flag(flag)?;
-        let cur = items.iter().any(|(u, i)| u == feed_url && i.guid == guid);
-        self.set_flag(feed_url, guid, flag, !cur)?;
-        Ok(!cur)
+        let col = match flag {
+            "read_later" | "saved" => flag,
+            _ => return Ok(false),
+        };
+        let sql = format!("SELECT {col} FROM items WHERE feed_url = ?1 AND guid = ?2");
+        let cur: i64 = self
+            .conn
+            .query_row(&sql, rusqlite::params![feed_url, guid], |r| r.get(0))
+            .unwrap_or(0);
+        self.set_flag(feed_url, guid, flag, cur == 0)?;
+        Ok(cur == 0)
     }
 
     pub fn is_read(&self, feed_url: &str, guid: &str) -> rusqlite::Result<bool> {
@@ -305,6 +312,13 @@ impl Db {
     }
 
     /// Purge fetched content older than ttl_days (keep item metadata).
+    /// Delete all items of a removed feed.
+    pub fn remove_feed_items(&mut self, feed_url: &str) -> rusqlite::Result<()> {
+        self.conn
+            .execute("DELETE FROM items WHERE feed_url = ?1", [feed_url])?;
+        Ok(())
+    }
+
     pub fn cleanup_content(&mut self, ttl_days: u64) -> rusqlite::Result<()> {
         if ttl_days == 0 {
             return Ok(());

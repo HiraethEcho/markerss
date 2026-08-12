@@ -1,9 +1,8 @@
 //! Shared data model.
 
-use serde::{Deserialize, Serialize};
 
 /// One feed item (article).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Item {
     pub guid: String,
     pub title: String,

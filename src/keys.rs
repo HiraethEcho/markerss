@@ -649,9 +649,6 @@ impl App {
                 self.list_sel = self.list_sel.saturating_sub(1);
                 self.article_scroll = 0;
             }
-            // n/p: mark current read, jump to next/prev unread
-            KeyCode::Char('n') => self.mark_read_and_jump(1),
-            KeyCode::Char('p') => self.mark_read_and_jump(-1),
             _ => {}
         }
     }

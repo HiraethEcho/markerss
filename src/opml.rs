@@ -30,7 +30,8 @@ fn category_outlines(file: &File, path: &[String]) -> String {
     for child in file.child_categories(path) {
         let mut child_path = path.to_vec();
         child_path.push(child.clone());
-        out.push_str(&format!("<outline text=\"{child}\" title=\"{child}\">\n"));
+        let esc = child.replace('&', "&amp;").replace('<', "&lt;").replace('"', "&quot;");
+        out.push_str(&format!("<outline text=\"{esc}\" title=\"{esc}\">\n"));
         out.push_str(&category_outlines(file, &child_path));
         for f in file.by_category_path(&child_path) {
             out.push_str(&feed_outline(f));
@@ -84,6 +85,8 @@ pub fn import_opml(xml: &str) -> io::Result<Vec<Feed>> {
             }
             Ok(Event::End(e)) => {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                // pop only if this outline opened a category (Start without xmlUrl);
+                // feed outlines (Empty) never pushed
                 if name == "outline" && !stack.is_empty() {
                     stack.pop();
                 }

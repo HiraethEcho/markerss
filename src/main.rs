@@ -385,6 +385,7 @@ impl App {
                 TreeRow::Favourite | TreeRow::Uncategorized => Scope::AllUnread,
             };
             self.list_sel = 0;
+            self.clear_search();
             self.rebuild_list();
         }
     }
@@ -724,6 +725,8 @@ impl App {
             self.save_urls();
             self.rebuild_tree();
             self.status = format!("removed {name}");
+            self.db.remove_feed_items(&url).ok();
+            self.scoped_items.retain(|(u, _)| u != &url);
             if self.scope == Scope::Feed(url) {
                 self.scope = Scope::AllUnread;
                 self.rebuild_list();
@@ -915,13 +918,20 @@ impl App {
                 self.db.update_item_content(&feed_url, &guid, &html).ok();
                 // content changed — invalidate the rendered-body cache
                 self.article_render = None;
+                // update the scoped item in place — a rebuild would drop this
+                // just-opened (read) item from the AllUnread view
+                for (u, i) in self.scoped_items.iter_mut() {
+                    if u == &feed_url && i.guid == guid {
+                        i.content = html.clone();
+                        break;
+                    }
+                }
                 self.status = format!("fetched {} ({} chars)", url, html.len());
             }
             Err(e) => {
                 self.status = format!("fetch failed: {e}");
             }
         }
-        self.rebuild_list();
     }
 
     // ── actions ───────────────────────────────────────────────────────────
@@ -1085,6 +1095,7 @@ fn main() -> io::Result<()> {
                 app.collapsed.insert(path.join("/"));
             }
         }
+        app.rebuild_tree();
     }
     app.db.cleanup_content(app.cfg.cache_ttl_days).ok();
     // startup: fetch new items (append-only) — never a full refresh
@@ -1119,18 +1130,20 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()>
         }
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(k) = event::read()? {
-                if k.kind == KeyEventKind::Press {
+                // Press + Repeat (held keys auto-repeat), not Release
+                if matches!(k.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
                     app.on_key(k.code, k.modifiers);
-                    redraw = true;
                 }
+                redraw = true;
             }
             // swallow resize/other events, still redraw
             while event::poll(Duration::from_millis(0))? {
-                if let Event::Key(k) = event::read()? {
-                    if k.kind == KeyEventKind::Press {
+                match event::read()? {
+                    Event::Key(k) if matches!(k.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
                         app.on_key(k.code, k.modifiers);
                         redraw = true;
                     }
+                    _ => redraw = true, // Resize etc. → repaint
                 }
             }
         }
