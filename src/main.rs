@@ -41,6 +41,7 @@ enum Msg {
         full: bool,
     },
     ArticleFetched { url: String, guid: String, result: Result<String, String> },
+    ImageLoaded { url: String, data: Result<Vec<u8>, String> },
     RefreshTick,
 }
 
@@ -75,6 +76,16 @@ enum Scope {
     Category(String),
     Feed(String),
     Tag(String),
+}
+
+/// TUI image state: protocol picker + decoded cache + per-image protocols.
+#[derive(Default)]
+struct Images {
+    picker: Option<ratatui_image::picker::Picker>,
+    cache: std::collections::HashMap<String, image::DynamicImage>,
+    protocols: std::collections::HashMap<String, ratatui_image::protocol::Protocol>,
+    pending: std::collections::HashSet<String>,
+    failed: std::collections::HashSet<String>,
 }
 
 struct App {
@@ -122,6 +133,8 @@ struct App {
     feed_errors: std::collections::HashMap<String, String>,
     link_mode: bool,
     link_hints: Vec<(String, String)>,
+    render_images: Vec<String>,
+    images: Images,
     input: Option<InputPrompt>,
     add_pending: Option<String>,
     add_pending_title: Option<String>,
@@ -193,6 +206,8 @@ impl App {
             feed_errors: std::collections::HashMap::new(),
             link_mode: false,
             link_hints: Vec::new(),
+            render_images: Vec::new(),
+            images: Images::default(),
             input: None,
             add_pending: None,
             add_pending_title: None,
@@ -1113,6 +1128,8 @@ fn main() -> io::Result<()> {
     }
 
     let mut terminal = ratatui::init();
+    // query terminal for kitty/sixel/halfblock image support (after alt-screen)
+    app.images.picker = ratatui_image::picker::Picker::from_query_stdio().ok();
     let result = run(&mut terminal, &mut app);
     ratatui::restore();
     result
@@ -1134,6 +1151,24 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()>
                 Msg::ArticleFetched { url, guid, result } => {
                     app.handle_article_fetched(url, guid, result)
                 }
+                Msg::ImageLoaded { url, data } => match data {
+                    Ok(bytes) => match image::load_from_memory(&bytes) {
+                        Ok(img) => {
+                            app.images.pending.remove(&url);
+                            app.images.cache.insert(url, img);
+                        }
+                        Err(e) => {
+                            app.images.pending.remove(&url);
+                            app.images.failed.insert(url);
+                            app.status = format!("image decode failed: {e}");
+                        }
+                    },
+                    Err(e) => {
+                        app.images.pending.remove(&url);
+                        app.images.failed.insert(url);
+                        app.status = format!("image fetch failed: {e}");
+                    }
+                },
                 Msg::RefreshTick => app.refresh_all(false),
             }
         }

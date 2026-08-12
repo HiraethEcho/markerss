@@ -25,6 +25,18 @@ pub fn http(timeout_secs: u64, proxy: Option<&str>) -> reqwest::blocking::Client
     b.build().expect("http client")
 }
 
+/// Fetch raw bytes (images); used by the TUI image pipeline.
+pub fn fetch_raw(url: &str, timeout_secs: u64, proxy: Option<&str>) -> Result<Vec<u8>, String> {
+    let resp = http(timeout_secs, proxy)
+        .get(url)
+        .send()
+        .map_err(|e| format!("GET {url}: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("GET {url}: HTTP {}", resp.status()));
+    }
+    resp.bytes().map(|b| b.to_vec()).map_err(|e| format!("{url}: {e}"))
+}
+
 /// Refresh one feed; returns items sorted newest-first.
 pub fn refresh_feed(url: &str, timeout_secs: u64, proxy: Option<&str>) -> Result<Vec<Item>, String> {
     let resp = http(timeout_secs, proxy)

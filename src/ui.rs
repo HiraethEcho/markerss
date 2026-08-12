@@ -7,9 +7,12 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
+use std::thread;
+
+use crate::fetch;
 use crate::model::Item;
 use crate::util::{display_width, fmt_date};
-use crate::{App, InputMode, InputPrompt, Scope, TreeRow};
+use crate::{App, InputMode, InputPrompt, Msg, Scope, TreeRow};
 
 pub(crate) fn render(frame: &mut Frame, app: &mut App) {
     let [main, status_bar] = Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(frame.area());
@@ -257,25 +260,31 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &App) {
 
 
 /// Build the styled article body Text (HTML → markdown → styled spans).
-fn render_article_text(app: &App, item: &Item) -> ratatui::text::Text<'static> {
+/// Also returns the image urls in render order (for TUI image display).
+fn render_article_text(app: &App, item: &Item) -> (ratatui::text::Text<'static>, Vec<String>) {
     let md = app.article_markdown_display(item);
     if md.trim().is_empty() {
-        return Text::from(""); // caller falls back to the fetch hint
+        return (Text::from(""), Vec::new()); // caller falls back to the fetch hint
     }
     let link_style = Style::default()
         .fg(app.theme.accent)
         .add_modifier(Modifier::UNDERLINED);
     let img_style = Style::default().fg(app.theme.dim);
+    let state = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let s = state.clone();
     let renderer = the_other_tui_markdown::RendererBuilder::new()
         .with_theme(app.theme.md.clone())
         .with_link(move |alt, _url| {
             vec![Span::styled(alt.to_string(), link_style)]
         })
-        .with_image(move |_alt, _url| {
+        .with_image(move |_alt, url| {
+            s.lock().unwrap().push(url.to_string());
             vec![Span::styled("[img]", img_style)]
         })
         .build();
-    the_other_tui_markdown::into_text_with_renderer(&md, &renderer)
+    let text = the_other_tui_markdown::into_text_with_renderer(&md, &renderer);
+    let urls = std::sync::Arc::try_unwrap(state).ok().unwrap().into_inner().unwrap();
+    (text, urls)
 }
 
 /// Header text: title / meta (feed · date · read · flags) / url / summary.
@@ -311,10 +320,10 @@ fn article_header<'a>(app: &App, url: &str, item: &'a Item, feed_name: &'a str) 
 
 /// Link-jump render: every link gets a `[hint]` prefix; returns the
 /// (alt, url) table in the same order as the hints (max 35).
-fn render_article_text_hints(app: &App, item: &Item) -> (Text<'static>, Vec<(String, String)>) {
+fn render_article_text_hints(app: &App, item: &Item) -> (Text<'static>, Vec<(String, String)>, Vec<String>) {
     let md = app.article_markdown_display(item);
     if md.trim().is_empty() {
-        return (Text::from(""), Vec::new());
+        return (Text::from(""), Vec::new(), Vec::new());
     }
     let link_style = Style::default()
         .fg(app.theme.accent)
@@ -323,6 +332,8 @@ fn render_article_text_hints(app: &App, item: &Item) -> (Text<'static>, Vec<(Str
     let img_style = Style::default().fg(app.theme.dim);
     let state = std::sync::Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));
     let s = state.clone();
+    let img_state = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let is = img_state.clone();
     let renderer = the_other_tui_markdown::RendererBuilder::new()
         .with_theme(app.theme.md.clone())
         .with_link(move |alt, url| {
@@ -339,13 +350,15 @@ fn render_article_text_hints(app: &App, item: &Item) -> (Text<'static>, Vec<(Str
                 vec![Span::styled(alt.to_string(), link_style)]
             }
         })
-        .with_image(move |_alt, _url| {
+        .with_image(move |_alt, url| {
+            is.lock().unwrap().push(url.to_string());
             vec![Span::styled("[img]", img_style)]
         })
         .build();
     let text = the_other_tui_markdown::into_text_with_renderer(&md, &renderer);
     let hints = std::sync::Arc::try_unwrap(state).ok().unwrap().into_inner().unwrap();
-    (text, hints)
+    let urls = std::sync::Arc::try_unwrap(img_state).ok().unwrap().into_inner().unwrap();
+    (text, hints, urls)
 }
 
 /// 0 → '1', …, 8 → '9', 9 → 'a', … (hint keys for link jump).
@@ -422,13 +435,15 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     // Links render as underlined alt text (no URL); images as [img].
     let body_text = if app.link_mode && content_ready {
         // link-jump: render with hints (no cache — fresh hints each time)
-        let (t, hints) = render_article_text_hints(app, &item);
+        let (t, hints, urls) = render_article_text_hints(app, &item);
         app.link_hints = hints;
+        app.render_images = urls;
         t
     } else if content_ready {
         // render once per guid; reuse until the item's content changes
         if !matches!(&app.article_render, Some((g, _)) if g == &item.guid) {
-            let t = render_article_text(app, &item);
+            let (t, urls) = render_article_text(app, &item);
+            app.render_images = urls;
             app.article_render = Some((item.guid.clone(), t.clone()));
         }
         app.article_render.as_ref().map(|(_, t)| t.clone()).unwrap_or_default()
@@ -476,6 +491,79 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     }
 
     frame.render_widget(block, area);
+
+    // ── TUI images (kitty/sixel/halfblocks) ──────────────────────────────
+    // Walk the body lines with a wrap estimate to find `[img]` rows; download
+    // missing images in the background; overlay decoded ones.
+    if content_ready && app.cfg.images && !app.render_images.is_empty() {
+        let mut y = 0u16; // estimated wrapped row offset
+        let mut img_idx = 0usize;
+        let mut img_rows: Vec<(u16, String)> = Vec::new();
+        for line in body_text.lines.iter() {
+            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            if text.contains("[img]") {
+                if let Some(url) = app.render_images.get(img_idx) {
+                    img_rows.push((y, url.clone()));
+                }
+                img_idx += 1;
+                y += 1;
+            } else {
+                let w = display_width(&text);
+                y += (w / content_w.max(1) as usize).max(1) as u16;
+            }
+        }
+        let mut spawn = Vec::new();
+        for (row, url) in &img_rows {
+            // request missing images (once per url)
+            if !app.images.cache.contains_key(url)
+                && !app.images.pending.contains(url)
+                && !app.images.failed.contains(url)
+            {
+                app.images.pending.insert(url.clone());
+                spawn.push(url.clone());
+            }
+            // overlay cached images at the estimated row
+            if let Some(img) = app.images.cache.get(url) {
+                let y_pos = body.y + row.saturating_sub(scroll);
+                if y_pos + 1 < body.y + body.height {
+                    if let Some(picker) = &app.images.picker {
+                        if !app.images.protocols.contains_key(url) {
+                            match picker.new_protocol(
+                                img.clone(),
+                                ratatui::layout::Size::new(
+                                    content_w,
+                                    body.height.min(12),
+                                ),
+                                ratatui_image::Resize::Fit(None),
+                            ) {
+                                Ok(p) => {
+                                    app.images.protocols.insert(url.clone(), p);
+                                }
+                                Err(_) => continue, // unsupported image — skip
+                            }
+                        }
+                        let proto = app.images.protocols.get(url).unwrap();
+                        let img_area = Rect {
+                            x: body.x + x_off,
+                            y: y_pos,
+                            width: content_w,
+                            height: proto.size().height,
+                        };
+                        frame.render_widget(ratatui_image::Image::new(proto), img_area);
+                    }
+                }
+            }
+        }
+        for url in spawn {
+            let tx = app.tx.clone();
+            let timeout = app.cfg.fetch_timeout;
+            let proxy = app.cfg.proxy.clone();
+            thread::spawn(move || {
+                let data = fetch::fetch_raw(&url, timeout, proxy.as_deref());
+                tx.send(Msg::ImageLoaded { url, data }).ok();
+            });
+        }
+    }
 }
 
 fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
