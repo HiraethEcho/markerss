@@ -296,10 +296,13 @@ impl Db {
             _ => return Ok(false),
         };
         let sql = format!("SELECT {col} FROM items WHERE feed_url = ?1 AND guid = ?2");
-        let cur: i64 = self
+        let cur: Option<i64> = self
             .conn
             .query_row(&sql, rusqlite::params![feed_url, guid], |r| r.get(0))
-            .unwrap_or(0);
+            .ok();
+        let Some(cur) = cur else {
+            return Ok(false); // row gone — nothing to toggle
+        };
         self.set_flag(feed_url, guid, flag, cur == 0)?;
         Ok(cur == 0)
     }

@@ -65,6 +65,18 @@ struct InputPrompt {
     buf: String,
 }
 
+/// In-flight wizard state for multi-step input flows (add feed, edit tags,
+/// export). One field instead of five parallel options.
+enum PendingInput {
+    AddFeed {
+        url: String,
+        title: Option<String>,
+        category: Option<Vec<String>>,
+    },
+    EditTags { url: String },
+    Export { feed_url: String, guid: String },
+}
+
 // ─── app state ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]
@@ -119,11 +131,7 @@ struct App {
     keymap: std::collections::HashMap<Vec<KeyCode>, crate::keys::Action>,
     feed_errors: std::collections::HashMap<String, String>,
     input: Option<InputPrompt>,
-    add_pending: Option<String>,
-    add_pending_title: Option<String>,
-    add_pending_category: Option<Vec<String>>,
-    edit_tags_url: Option<String>,
-    export_pending: Option<(String, String)>,
+    pending: Option<PendingInput>,
     rx: Receiver<Msg>,
     tx: Sender<Msg>,
 }
@@ -186,11 +194,7 @@ impl App {
             keymap,
             feed_errors: std::collections::HashMap::new(),
             input: None,
-            add_pending: None,
-            add_pending_title: None,
-            add_pending_category: None,
-            edit_tags_url: None,
-            export_pending: None,
+            pending: None,
             rx,
             tx,
         };
@@ -543,8 +547,12 @@ impl App {
         };
         let mut buf = String::new();
         // prefill current tags when editing
+        let pending_url = match &self.pending {
+            Some(PendingInput::EditTags { url }) => Some(url.clone()),
+            _ => None,
+        };
         if let InputMode::EditTags = &mode {
-            if let Some(url) = &self.edit_tags_url {
+            if let Some(url) = &pending_url {
                 if let Some(f) = self.feeds.feeds.iter().find(|f| &f.url == url) {
                     buf = f
                         .feed_tags
@@ -557,7 +565,7 @@ impl App {
         }
         // prefill the current custom title when editing
         if let InputMode::EditFeedTitle = &mode {
-            if let Some(url) = &self.edit_tags_url {
+            if let Some(url) = &pending_url {
                 if let Some(f) = self.feeds.feeds.iter().find(|f| &f.url == url) {
                     if f.custom_name {
                         buf = f.title.clone().unwrap_or_default();
@@ -578,29 +586,33 @@ impl App {
                     self.status = "add feed cancelled (empty url)".into();
                     return;
                 }
-                self.add_pending = Some(val);
+                self.pending = Some(PendingInput::AddFeed { url: val, title: None, category: None });
                 self.start_input(InputMode::AddTitle);
             }
             InputMode::AddTitle => {
-                let url = self.add_pending.take().unwrap_or_default();
-                if url.is_empty() {
+                let Some(PendingInput::AddFeed { url, .. }) = self.pending.take() else {
                     return;
-                }
-                self.add_pending = Some(url);
-                self.add_pending_title = if val.is_empty() { None } else { Some(val) };
+                };
+                self.pending = Some(PendingInput::AddFeed {
+                    url,
+                    title: if val.is_empty() { None } else { Some(val) },
+                    category: None,
+                });
                 self.start_input(InputMode::AddCategory);
             }
             InputMode::AddCategory => {
-                let url = self.add_pending.take().unwrap_or_default();
+                let Some(PendingInput::AddFeed { url, title, .. }) = self.pending.take() else {
+                    return;
+                };
                 let tags: Vec<String> = val.split_whitespace().map(str::to_string).collect();
-                self.add_pending = Some(url);
-                self.add_pending_category = Some(tags);
+                self.pending = Some(PendingInput::AddFeed { url, title, category: Some(tags) });
                 self.start_input(InputMode::AddTags);
             }
             InputMode::AddTags => {
-                let url = self.add_pending.take().unwrap_or_default();
-                let title = self.add_pending_title.take();
-                let tags = self.add_pending_category.take().unwrap_or_default();
+                let Some(PendingInput::AddFeed { url, title, category }) = self.pending.take() else {
+                    return;
+                };
+                let tags = category.unwrap_or_default();
                 let feed_tags: Vec<String> = val
                     .split_whitespace()
                     .map(|w| w.trim_start_matches('#').to_string())
@@ -621,10 +633,9 @@ impl App {
                 self.refresh_feed_thread(url, false);
             }
             InputMode::EditTags => {
-                let url = self.edit_tags_url.take().unwrap_or_default();
-                if url.is_empty() {
+                let Some(PendingInput::EditTags { url }) = self.pending.take() else {
                     return;
-                }
+                };
                 let feed_tags: Vec<String> = val
                     .split_whitespace()
                     .map(|w| w.trim_start_matches('#').to_string())
@@ -651,10 +662,9 @@ impl App {
                 }
             }
             InputMode::EditFeedTitle => {
-                let url = self.edit_tags_url.take().unwrap_or_default();
-                if url.is_empty() {
+                let Some(PendingInput::EditTags { url }) = self.pending.take() else {
                     return;
-                }
+                };
                 if let Some(f) = self.feeds.feeds.iter_mut().find(|f| f.url == url) {
                     if val.is_empty() {
                         // clear the custom title — fall back to feed-provided name
@@ -919,7 +929,15 @@ impl App {
         self.fetching = false;
         match result {
             Ok(html) => {
-                let Some((feed_url, _)) = self.current_item() else {
+                // locate the row by guid so a mid-fetch selection change
+                // can't write to the wrong feed
+                let Some((feed_url, _)) = self
+                    .scoped_items
+                    .iter()
+                    .find(|(_, i)| i.guid == guid)
+                    .cloned()
+                    .or_else(|| self.current_item())
+                else {
                     self.status = format!("fetched {} (stale view)", url);
                     return;
                 };
@@ -950,6 +968,10 @@ impl App {
             let items = self.scoped_items.clone();
             for (url, i) in items {
                 self.db.set_read(&url, &i.guid, true).ok();
+                // reading clears the read-later flag (matches open/navigation)
+                if self.scope == Scope::ReadLater {
+                    self.db.set_flag(&url, &i.guid, "read_later", false).ok();
+                }
             }
             self.rebuild_list();
             self.status = "marked all read".into();
@@ -1013,7 +1035,7 @@ impl App {
             self.cfg.export_dir.join(category)
         };
         let default_path = dir.join(format!("{slug}.md"));
-        self.export_pending = Some((feed_url, item.guid));
+        self.pending = Some(PendingInput::Export { feed_url, guid: item.guid });
         self.input = Some(InputPrompt {
             mode: InputMode::ExportFile,
             prompt: "export as (enter = default):".to_string(),
@@ -1023,7 +1045,7 @@ impl App {
 
     /// Finish the export after the rename prompt (or default path).
     fn finish_export(&mut self, path: std::path::PathBuf) {
-        let Some((feed_url, guid)) = self.export_pending.take() else {
+        let Some(PendingInput::Export { feed_url, guid }) = self.pending.take() else {
             return;
         };
         let Some(item) = self
