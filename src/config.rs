@@ -149,6 +149,7 @@ struct RawConfig {
     keybindings: Option<std::collections::HashMap<String, String>>,
     sort: Option<Vec<String>>,
     foldlevel: Option<usize>,
+    reading_width: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -180,6 +181,7 @@ pub struct Config {
     pub proxy: Option<String>,
     pub sort: Vec<String>,
     pub foldlevel: Option<usize>,
+    pub reading_width: u64,
     pub keybindings: std::collections::HashMap<String, String>,
 }
 
@@ -207,6 +209,7 @@ impl Config {
             proxy: None,
             sort: Vec::new(),
             foldlevel: None,
+            reading_width: 0,
             keybindings: std::collections::HashMap::new(),
             config_dir: config_dir.clone(),
         };
@@ -244,6 +247,7 @@ impl Config {
             self.sort = v.into_iter().take(3).collect();
         }
         self.foldlevel = raw.foldlevel;
+        self.reading_width = raw.reading_width.unwrap_or(0);
         if let Some(k) = raw.keybindings {
             self.keybindings = k;
         }

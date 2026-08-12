@@ -403,8 +403,12 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     let para = Paragraph::new(body_text.clone())
         .wrap(Wrap { trim: true })
         .scroll((scroll, 0));
-    // reading width: cap the body at ~80 cols, centered in the pane
-    let content_w = body.width.min(80);
+    // reading width: cap (and center) only when configured (>0 = unlimited)
+    let content_w = if app.cfg.reading_width > 0 {
+        body.width.min(app.cfg.reading_width as u16)
+    } else {
+        body.width
+    };
     let x_off = (body.width - content_w) / 2;
     let content_area = Rect {
         x: body.x + x_off,
