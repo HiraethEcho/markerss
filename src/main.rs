@@ -110,7 +110,7 @@ struct App {
     // article
     article_scroll: u16,
     fetching: bool,
-    // rendered article body, keyed by item guid (avoid per-frame html2md)
+    // rendered article body, keyed by item guid (avoid per-frame conversion)
     article_render: Option<(String, ratatui::text::Text<'static>)>,
 
     focus: usize, // 0 nav, 1 list, 2 article

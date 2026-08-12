@@ -380,7 +380,7 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     );
 
     // Body: feed/fetched HTML → markdown → styled ratatui Text
-    // (eilmeldung-style pipeline: html2md + the_other_tui_markdown).
+    // (h2md → tui-markdown pipeline).
     // Links render as underlined alt text (no URL); images as [img].
     let body_text = if content_ready {
         // render once per guid; reuse until the item's content changes
