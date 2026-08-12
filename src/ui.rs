@@ -397,12 +397,6 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     } else {
         Text::from("l/enter to read")
     };
-    // clamp scroll to content length (G jumps to bottom, not past it)
-    let max_scroll = (body_text.lines.len() as u16).saturating_sub(body.height);
-    let scroll = app.article_scroll.min(max_scroll);
-    let para = Paragraph::new(body_text.clone())
-        .wrap(Wrap { trim: true })
-        .scroll((scroll, 0));
     // reading width: cap (and center) only when configured (>0 = unlimited)
     let content_w = if app.cfg.reading_width > 0 {
         body.width.min(app.cfg.reading_width as u16)
@@ -410,6 +404,23 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
         body.width
     };
     let x_off = (body.width - content_w) / 2;
+
+    // clamp scroll to the estimated wrapped content height (tui-markdown
+    // emits unwrapped logical lines; G must reach the wrapped bottom)
+    let content_w_est = content_w.max(1) as usize;
+    let est_lines: u16 = body_text
+        .lines
+        .iter()
+        .map(|l| {
+            let t: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
+            display_width(&t).div_ceil(content_w_est).max(1) as u16
+        })
+        .sum();
+    let max_scroll = est_lines.saturating_sub(body.height);
+    let scroll = app.article_scroll.min(max_scroll);
+    let para = Paragraph::new(body_text.clone())
+        .wrap(Wrap { trim: true })
+        .scroll((scroll, 0));
     let content_area = Rect {
         x: body.x + x_off,
         y: body.y,
