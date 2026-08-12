@@ -185,11 +185,13 @@ impl App {
                         .tree_rows
                         .get(self.tree_sel)
                         .map(|r| match r {
-                            TreeRow::Feed(_, n, _) => n.clone(),
+                            TreeRow::Feed(_, n, _)
+                            | TreeRow::FavouriteFeed(_, n)
+                            | TreeRow::UncategorizedFeed(_, n) => n.clone(),
                             _ => String::new(),
                         })
                         .unwrap_or_default();
-                    self.status = format!("press d again to delete {name}");
+                    self.status = format!("press D again to delete {name}");
                 }
             }
             Action::Rename if self.focus == 0 => {
@@ -197,7 +199,7 @@ impl App {
                     Some(TreeRow::Category(_)) => self.start_input(InputMode::RenameCategory),
                     Some(TreeRow::Tag(_)) => self.start_input(InputMode::EditTag),
                     Some(TreeRow::Feed(url, _, _)) => {
-                        self.edit_tags_url = Some(url.clone());
+                        self.pending = Some(crate::PendingInput::EditTags { url: url.clone() });
                         self.start_input(InputMode::EditFeedTitle);
                     }
                     _ => {}
@@ -205,7 +207,7 @@ impl App {
             }
             Action::EditTags if self.focus == 0 => {
                 if let Some(TreeRow::Feed(url, _, _)) = self.tree_rows.get(self.tree_sel).cloned() {
-                    self.edit_tags_url = Some(url);
+                    self.pending = Some(crate::PendingInput::EditTags { url });
                     self.start_input(InputMode::EditTags);
                 }
             }
@@ -409,7 +411,10 @@ impl App {
         }
     }
     fn toggle_favourite_feed(&mut self) {
-        let Some(TreeRow::Feed(url, _, _)) = self.tree_rows.get(self.tree_sel).cloned() else {
+        let Some(url) = self.tree_rows.get(self.tree_sel).and_then(|r| match r {
+            TreeRow::Feed(u, _, _) | TreeRow::FavouriteFeed(u, _) | TreeRow::UncategorizedFeed(u, _) => Some(u.clone()),
+            _ => None,
+        }) else {
             return;
         };
         let new_state = {
@@ -649,9 +654,6 @@ impl App {
                 self.list_sel = self.list_sel.saturating_sub(1);
                 self.article_scroll = 0;
             }
-            // n/p: mark current read, jump to next/prev unread
-            KeyCode::Char('n') => self.mark_read_and_jump(1),
-            KeyCode::Char('p') => self.mark_read_and_jump(-1),
             _ => {}
         }
     }
@@ -786,6 +788,13 @@ impl App {
         if self.sort_stack.is_empty() {
             return;
         }
+        // precompute read flags once (comparator must not hit the DB)
+        let read_set: std::collections::HashSet<(String, String)> = self
+            .scoped_items
+            .iter()
+            .filter(|(u, i)| self.db.is_read(u, &i.guid).unwrap_or(false))
+            .map(|(u, i)| (u.clone(), i.guid.clone()))
+            .collect();
         self.scoped_items.sort_by(|(ua, a), (ub, b)| {
             let mut ord = std::cmp::Ordering::Equal;
             for (level, reverse) in &self.sort_stack {
@@ -794,8 +803,8 @@ impl App {
                     "title" => a.title.cmp(&b.title),
                     "feed" => ua.cmp(ub),
                     "unread" => {
-                        let ra = self.db.is_read(ua, &a.guid).unwrap_or(false);
-                        let rb = self.db.is_read(ub, &b.guid).unwrap_or(false);
+                        let ra = read_set.contains(&(ua.clone(), a.guid.clone()));
+                        let rb = read_set.contains(&(ub.clone(), b.guid.clone()));
                         ra.cmp(&rb)
                     }
                     _ => ord,

@@ -9,9 +9,8 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Feed {
     pub url: String,
     /// Quoted title, `~` prefix stripped. `None` when no quoted title present.

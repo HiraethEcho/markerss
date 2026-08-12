@@ -65,6 +65,18 @@ struct InputPrompt {
     buf: String,
 }
 
+/// In-flight wizard state for multi-step input flows (add feed, edit tags,
+/// export). One field instead of five parallel options.
+enum PendingInput {
+    AddFeed {
+        url: String,
+        title: Option<String>,
+        category: Option<Vec<String>>,
+    },
+    EditTags { url: String },
+    Export { feed_url: String, guid: String },
+}
+
 // ─── app state ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]
@@ -100,7 +112,7 @@ struct App {
     article_scroll: u16,
     fetching: bool,
     // rendered article body, keyed by item guid (avoid per-frame conversion)
-    article_render: Option<(String, ratatui::text::Text<'static>)>,
+    article_render: Option<((String, String), ratatui::text::Text<'static>)>,
 
     focus: usize, // 0 nav, 1 list, 2 article
     fullscreen: bool,
@@ -119,11 +131,7 @@ struct App {
     keymap: std::collections::HashMap<Vec<KeyCode>, crate::keys::Action>,
     feed_errors: std::collections::HashMap<String, String>,
     input: Option<InputPrompt>,
-    add_pending: Option<String>,
-    add_pending_title: Option<String>,
-    add_pending_category: Option<Vec<String>>,
-    edit_tags_url: Option<String>,
-    export_pending: Option<(String, String)>,
+    pending: Option<PendingInput>,
     rx: Receiver<Msg>,
     tx: Sender<Msg>,
 }
@@ -186,11 +194,7 @@ impl App {
             keymap,
             feed_errors: std::collections::HashMap::new(),
             input: None,
-            add_pending: None,
-            add_pending_title: None,
-            add_pending_category: None,
-            edit_tags_url: None,
-            export_pending: None,
+            pending: None,
             rx,
             tx,
         };
@@ -385,6 +389,7 @@ impl App {
                 TreeRow::Favourite | TreeRow::Uncategorized => Scope::AllUnread,
             };
             self.list_sel = 0;
+            self.clear_search();
             self.rebuild_list();
         }
     }
@@ -542,8 +547,12 @@ impl App {
         };
         let mut buf = String::new();
         // prefill current tags when editing
+        let pending_url = match &self.pending {
+            Some(PendingInput::EditTags { url }) => Some(url.clone()),
+            _ => None,
+        };
         if let InputMode::EditTags = &mode {
-            if let Some(url) = &self.edit_tags_url {
+            if let Some(url) = &pending_url {
                 if let Some(f) = self.feeds.feeds.iter().find(|f| &f.url == url) {
                     buf = f
                         .feed_tags
@@ -556,7 +565,7 @@ impl App {
         }
         // prefill the current custom title when editing
         if let InputMode::EditFeedTitle = &mode {
-            if let Some(url) = &self.edit_tags_url {
+            if let Some(url) = &pending_url {
                 if let Some(f) = self.feeds.feeds.iter().find(|f| &f.url == url) {
                     if f.custom_name {
                         buf = f.title.clone().unwrap_or_default();
@@ -577,29 +586,33 @@ impl App {
                     self.status = "add feed cancelled (empty url)".into();
                     return;
                 }
-                self.add_pending = Some(val);
+                self.pending = Some(PendingInput::AddFeed { url: val, title: None, category: None });
                 self.start_input(InputMode::AddTitle);
             }
             InputMode::AddTitle => {
-                let url = self.add_pending.take().unwrap_or_default();
-                if url.is_empty() {
+                let Some(PendingInput::AddFeed { url, .. }) = self.pending.take() else {
                     return;
-                }
-                self.add_pending = Some(url);
-                self.add_pending_title = if val.is_empty() { None } else { Some(val) };
+                };
+                self.pending = Some(PendingInput::AddFeed {
+                    url,
+                    title: if val.is_empty() { None } else { Some(val) },
+                    category: None,
+                });
                 self.start_input(InputMode::AddCategory);
             }
             InputMode::AddCategory => {
-                let url = self.add_pending.take().unwrap_or_default();
+                let Some(PendingInput::AddFeed { url, title, .. }) = self.pending.take() else {
+                    return;
+                };
                 let tags: Vec<String> = val.split_whitespace().map(str::to_string).collect();
-                self.add_pending = Some(url);
-                self.add_pending_category = Some(tags);
+                self.pending = Some(PendingInput::AddFeed { url, title, category: Some(tags) });
                 self.start_input(InputMode::AddTags);
             }
             InputMode::AddTags => {
-                let url = self.add_pending.take().unwrap_or_default();
-                let title = self.add_pending_title.take();
-                let tags = self.add_pending_category.take().unwrap_or_default();
+                let Some(PendingInput::AddFeed { url, title, category }) = self.pending.take() else {
+                    return;
+                };
+                let tags = category.unwrap_or_default();
                 let feed_tags: Vec<String> = val
                     .split_whitespace()
                     .map(|w| w.trim_start_matches('#').to_string())
@@ -620,10 +633,9 @@ impl App {
                 self.refresh_feed_thread(url, false);
             }
             InputMode::EditTags => {
-                let url = self.edit_tags_url.take().unwrap_or_default();
-                if url.is_empty() {
+                let Some(PendingInput::EditTags { url }) = self.pending.take() else {
                     return;
-                }
+                };
                 let feed_tags: Vec<String> = val
                     .split_whitespace()
                     .map(|w| w.trim_start_matches('#').to_string())
@@ -650,10 +662,9 @@ impl App {
                 }
             }
             InputMode::EditFeedTitle => {
-                let url = self.edit_tags_url.take().unwrap_or_default();
-                if url.is_empty() {
+                let Some(PendingInput::EditTags { url }) = self.pending.take() else {
                     return;
-                }
+                };
                 if let Some(f) = self.feeds.feeds.iter_mut().find(|f| f.url == url) {
                     if val.is_empty() {
                         // clear the custom title — fall back to feed-provided name
@@ -719,11 +730,21 @@ impl App {
     }
 
     fn delete_selected_feed(&mut self) {
-        if let Some(TreeRow::Feed(url, name, _)) = self.tree_rows.get(self.tree_sel).cloned() {
+        let Some((url, name)) = self.tree_rows.get(self.tree_sel).and_then(|r| match r {
+            TreeRow::Feed(u, n, _) | TreeRow::FavouriteFeed(u, n) | TreeRow::UncategorizedFeed(u, n) => {
+                Some((u.clone(), n.clone()))
+            }
+            _ => None,
+        }) else {
+            return;
+        };
+        {
             self.feeds.remove(&url);
             self.save_urls();
             self.rebuild_tree();
             self.status = format!("removed {name}");
+            self.db.remove_feed_items(&url).ok();
+            self.scoped_items.retain(|(u, _)| u != &url);
             if self.scope == Scope::Feed(url) {
                 self.scope = Scope::AllUnread;
                 self.rebuild_list();
@@ -908,20 +929,35 @@ impl App {
         self.fetching = false;
         match result {
             Ok(html) => {
-                let Some((feed_url, _)) = self.current_item() else {
+                // locate the row by guid so a mid-fetch selection change
+                // can't write to the wrong feed
+                let Some((feed_url, _)) = self
+                    .scoped_items
+                    .iter()
+                    .find(|(_, i)| i.guid == guid)
+                    .cloned()
+                    .or_else(|| self.current_item())
+                else {
                     self.status = format!("fetched {} (stale view)", url);
                     return;
                 };
                 self.db.update_item_content(&feed_url, &guid, &html).ok();
                 // content changed — invalidate the rendered-body cache
                 self.article_render = None;
+                // update the scoped item in place — a rebuild would drop this
+                // just-opened (read) item from the AllUnread view
+                for (u, i) in self.scoped_items.iter_mut() {
+                    if u == &feed_url && i.guid == guid {
+                        i.content = html.clone();
+                        break;
+                    }
+                }
                 self.status = format!("fetched {} ({} chars)", url, html.len());
             }
             Err(e) => {
                 self.status = format!("fetch failed: {e}");
             }
         }
-        self.rebuild_list();
     }
 
     // ── actions ───────────────────────────────────────────────────────────
@@ -932,6 +968,10 @@ impl App {
             let items = self.scoped_items.clone();
             for (url, i) in items {
                 self.db.set_read(&url, &i.guid, true).ok();
+                // reading clears the read-later flag (matches open/navigation)
+                if self.scope == Scope::ReadLater {
+                    self.db.set_flag(&url, &i.guid, "read_later", false).ok();
+                }
             }
             self.rebuild_list();
             self.status = "marked all read".into();
@@ -974,13 +1014,10 @@ impl App {
     /// Open an arbitrary URL in the configured browser (fallback xdg-open).
     fn open_url(&mut self, url: &str) {
         let cmd = self.cfg.browser.clone().unwrap_or_else(|| "xdg-open".to_string());
-        let _ = std::process::Command::new(&cmd)
-            .arg(url)
-            .spawn()
-            .map_err(|e| {
-                self.status = format!("{cmd} failed: {e}");
-            });
-        self.status = format!("opened {url}");
+        match std::process::Command::new(&cmd).arg(url).spawn() {
+            Ok(_) => self.status = format!("opened {url}"),
+            Err(e) => self.status = format!("{cmd} failed: {e}"),
+        }
     }
 
     /// Start the export flow: prompt with the default filename as placeholder.
@@ -998,7 +1035,7 @@ impl App {
             self.cfg.export_dir.join(category)
         };
         let default_path = dir.join(format!("{slug}.md"));
-        self.export_pending = Some((feed_url, item.guid));
+        self.pending = Some(PendingInput::Export { feed_url, guid: item.guid });
         self.input = Some(InputPrompt {
             mode: InputMode::ExportFile,
             prompt: "export as (enter = default):".to_string(),
@@ -1008,7 +1045,7 @@ impl App {
 
     /// Finish the export after the rename prompt (or default path).
     fn finish_export(&mut self, path: std::path::PathBuf) {
-        let Some((feed_url, guid)) = self.export_pending.take() else {
+        let Some(PendingInput::Export { feed_url, guid }) = self.pending.take() else {
             return;
         };
         let Some(item) = self
@@ -1085,6 +1122,7 @@ fn main() -> io::Result<()> {
                 app.collapsed.insert(path.join("/"));
             }
         }
+        app.rebuild_tree();
     }
     app.db.cleanup_content(app.cfg.cache_ttl_days).ok();
     // startup: fetch new items (append-only) — never a full refresh
@@ -1119,18 +1157,20 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()>
         }
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(k) = event::read()? {
-                if k.kind == KeyEventKind::Press {
+                // Press + Repeat (held keys auto-repeat), not Release
+                if matches!(k.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
                     app.on_key(k.code, k.modifiers);
-                    redraw = true;
                 }
+                redraw = true;
             }
             // swallow resize/other events, still redraw
             while event::poll(Duration::from_millis(0))? {
-                if let Event::Key(k) = event::read()? {
-                    if k.kind == KeyEventKind::Press {
+                match event::read()? {
+                    Event::Key(k) if matches!(k.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
                         app.on_key(k.code, k.modifiers);
                         redraw = true;
                     }
+                    _ => redraw = true, // Resize etc. → repaint
                 }
             }
         }

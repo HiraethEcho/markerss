@@ -368,10 +368,11 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     // (h2md → tui-markdown pipeline).
     // Links render as underlined alt text (no URL); images as [img].
     let body_text = if content_ready {
-        // render once per guid; reuse until the item's content changes
-        if !matches!(&app.article_render, Some((g, _)) if g == &item.guid) {
+        // render once per (feed_url, guid); reuse until the item's content changes
+        let key = (url.clone(), item.guid.clone());
+        if !matches!(&app.article_render, Some((k, _)) if k == &key) {
             let t = render_article_text(app, &item);
-            app.article_render = Some((item.guid.clone(), t.clone()));
+            app.article_render = Some((key, t.clone()));
         }
         app.article_render.as_ref().map(|(_, t)| t.clone()).unwrap_or_default()
     } else if app.fetching {
@@ -409,9 +410,11 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
         .sum();
     let max_scroll = est_lines.saturating_sub(body.height);
     let scroll = app.article_scroll.min(max_scroll);
-    // write back so j-at-bottom doesn't inflate article_scroll (k would need
-    // many presses to return) — this is the draw that clamps the state
-    app.article_scroll = scroll;
+    // write back only in article mode — in list mode the body is a one-line
+    // hint and clamping would zero the saved article position
+    if in_article {
+        app.article_scroll = scroll;
+    }
     let total_lines = body_text.lines.len() as u16;
     let para = Paragraph::new(body_text)
         .wrap(Wrap { trim: true })
