@@ -697,7 +697,7 @@ impl App {
 
     fn article_key(&mut self, key: KeyCode) {
         match key {
-            KeyCode::Char('j') | KeyCode::Down => self.article_scroll += 1,
+            KeyCode::Char('j') | KeyCode::Down => self.article_scroll = self.article_scroll.saturating_add(1),
             KeyCode::Char('k') | KeyCode::Up => self.article_scroll = self.article_scroll.saturating_sub(1),
             KeyCode::Char('n') | KeyCode::PageDown => self.next_prev_item(1),
             KeyCode::Char('p') | KeyCode::PageUp => self.next_prev_item(-1),
@@ -709,7 +709,7 @@ impl App {
         let half = (self.article_area.height.saturating_sub(4) / 2).max(1);
         match key {
             KeyCode::Char('u') => self.article_scroll = self.article_scroll.saturating_sub(half),
-            KeyCode::Char('d') => self.article_scroll += half,
+            KeyCode::Char('d') => self.article_scroll = self.article_scroll.saturating_add(half),
             _ => {}
         }
     }
