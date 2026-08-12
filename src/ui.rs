@@ -259,32 +259,42 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 
-/// Build the styled article body Text (HTML → markdown → styled spans).
-/// Also returns the image urls in render order (for TUI image display).
-fn render_article_text(app: &App, item: &Item) -> (ratatui::text::Text<'static>, Vec<String>) {
+/// Build the styled article body Text (HTML → markdown → tui-markdown).
+/// Images render as `[img] desc (url)` fallback text so the draw pass can
+/// locate rows and fetch/overlay real pictures.
+fn render_article_text(app: &App, item: &Item) -> Text<'static> {
     let md = app.article_markdown_display(item);
     if md.trim().is_empty() {
-        return (Text::from(""), Vec::new()); // caller falls back to the fetch hint
+        return Text::from(""); // caller falls back to the fetch hint
     }
-    let link_style = Style::default()
-        .fg(app.theme.accent)
-        .add_modifier(Modifier::UNDERLINED);
-    let img_style = Style::default().fg(app.theme.dim);
-    let state = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-    let s = state.clone();
-    let renderer = the_other_tui_markdown::RendererBuilder::new()
-        .with_theme(app.theme.md.clone())
-        .with_link(move |alt, _url| {
-            vec![Span::styled(alt.to_string(), link_style)]
+    let options = tui_markdown::Options::new(app.theme.styles.clone())
+        .image_fallback(tui_markdown::ImageFallback::AltTextAndUrl);
+    let text = tui_markdown::from_str_with_options(&md, &options);
+    let lines: Vec<Line<'static>> = text
+        .lines
+        .into_iter()
+        .map(|l| {
+            let spans = l
+                .spans
+                .into_iter()
+                .map(|s| Span::styled(s.content.into_owned(), s.style))
+                .collect();
+            Line { spans, style: l.style, alignment: l.alignment }
         })
-        .with_image(move |_alt, url| {
-            s.lock().unwrap().push(url.to_string());
-            vec![Span::styled("[img]", img_style)]
-        })
-        .build();
-    let text = the_other_tui_markdown::into_text_with_renderer(&md, &renderer);
-    let urls = std::sync::Arc::try_unwrap(state).ok().unwrap().into_inner().unwrap();
-    (text, urls)
+        .collect();
+    Text::from(lines)
+}
+
+/// Parse `[img] desc (url)` fallback rows → image url.
+fn extract_image_url(line: &str) -> Option<String> {
+    let rest = line.trim_start().strip_prefix("[img]")?;
+    let open = rest.rfind('(')?;
+    let close = rest.rfind(')')?;
+    if close > open {
+        Some(rest[open + 1..close].trim().to_string())
+    } else {
+        None
+    }
 }
 
 /// Header text: title / meta (feed · date · read · flags) / url / summary.
@@ -316,67 +326,6 @@ fn article_header<'a>(app: &App, url: &str, item: &'a Item, feed_name: &'a str) 
         Line::from(""),
         Line::from(Span::styled(item.summary.trim(), Style::default())),
     ])
-}
-
-/// Link-jump render: every link gets a `[hint]` prefix; returns the
-/// (alt, url) table in the same order as the hints (max 35).
-fn render_article_text_hints(app: &App, item: &Item) -> (Text<'static>, Vec<(String, String)>, Vec<String>) {
-    let md = app.article_markdown_display(item);
-    if md.trim().is_empty() {
-        return (Text::from(""), Vec::new(), Vec::new());
-    }
-    let link_style = Style::default()
-        .fg(app.theme.accent)
-        .add_modifier(Modifier::UNDERLINED);
-    let hint_style = Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD);
-    let img_style = Style::default().fg(app.theme.dim);
-    let state = std::sync::Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));
-    let s = state.clone();
-    let img_state = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-    let is = img_state.clone();
-    let renderer = the_other_tui_markdown::RendererBuilder::new()
-        .with_theme(app.theme.md.clone())
-        .with_link(move |alt, url| {
-            let mut v = s.lock().unwrap();
-            let idx = v.len();
-            if idx < 35 {
-                let hint = hint_char(idx);
-                v.push((alt.to_string(), url.to_string()));
-                vec![
-                    Span::styled(format!("[{hint}] "), hint_style),
-                    Span::styled(alt.to_string(), link_style),
-                ]
-            } else {
-                vec![Span::styled(alt.to_string(), link_style)]
-            }
-        })
-        .with_image(move |_alt, url| {
-            is.lock().unwrap().push(url.to_string());
-            vec![Span::styled("[img]", img_style)]
-        })
-        .build();
-    let text = the_other_tui_markdown::into_text_with_renderer(&md, &renderer);
-    let hints = std::sync::Arc::try_unwrap(state).ok().unwrap().into_inner().unwrap();
-    let urls = std::sync::Arc::try_unwrap(img_state).ok().unwrap().into_inner().unwrap();
-    (text, hints, urls)
-}
-
-/// 0 → '1', …, 8 → '9', 9 → 'a', … (hint keys for link jump).
-fn hint_char(idx: usize) -> char {
-    if idx < 9 {
-        (b'1' + idx as u8) as char
-    } else {
-        (b'a' + (idx - 9) as u8) as char
-    }
-}
-
-/// Map a pressed hint key back to its index.
-pub(crate) fn hint_index(c: char) -> Option<usize> {
-    match c {
-        '1'..='9' => Some((c as u8 - b'1') as usize),
-        'a'..='z' => Some((c as u8 - b'a') as usize + 9),
-        _ => None,
-    }
 }
 
 fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -433,17 +382,10 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     // Body: feed/fetched HTML → markdown → styled ratatui Text
     // (eilmeldung-style pipeline: html2md + the_other_tui_markdown).
     // Links render as underlined alt text (no URL); images as [img].
-    let body_text = if app.link_mode && content_ready {
-        // link-jump: render with hints (no cache — fresh hints each time)
-        let (t, hints, urls) = render_article_text_hints(app, &item);
-        app.link_hints = hints;
-        app.render_images = urls;
-        t
-    } else if content_ready {
+    let body_text = if content_ready {
         // render once per guid; reuse until the item's content changes
         if !matches!(&app.article_render, Some((g, _)) if g == &item.guid) {
-            let (t, urls) = render_article_text(app, &item);
-            app.render_images = urls;
+            let t = render_article_text(app, &item);
             app.article_render = Some((item.guid.clone(), t.clone()));
         }
         app.article_render.as_ref().map(|(_, t)| t.clone()).unwrap_or_default()
@@ -495,22 +437,21 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     // ── TUI images (kitty/sixel/halfblocks) ──────────────────────────────
     // Walk the body lines with a wrap estimate to find `[img]` rows; download
     // missing images in the background; overlay decoded ones.
-    if content_ready && app.cfg.images && !app.render_images.is_empty() {
+    if content_ready && app.cfg.images {
         let mut y = 0u16; // estimated wrapped row offset
-        let mut img_idx = 0usize;
         let mut img_rows: Vec<(u16, String)> = Vec::new();
         for line in body_text.lines.iter() {
             let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-            if text.contains("[img]") {
-                if let Some(url) = app.render_images.get(img_idx) {
-                    img_rows.push((y, url.clone()));
-                }
-                img_idx += 1;
+            if let Some(url) = extract_image_url(&text) {
+                img_rows.push((y, url));
                 y += 1;
             } else {
                 let w = display_width(&text);
                 y += (w / content_w.max(1) as usize).max(1) as u16;
             }
+        }
+        if img_rows.is_empty() {
+            return; // nothing to do
         }
         let mut spawn = Vec::new();
         for (row, url) in &img_rows {
@@ -648,16 +589,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn hint_roundtrip() {
-        for idx in 0..35 {
-            let c = hint_char(idx);
-            assert_eq!(hint_index(c), Some(idx), "idx {idx} char {c}");
-        }
-        assert_eq!(hint_char(0), '1');
-        assert_eq!(hint_char(8), '9');
-        assert_eq!(hint_char(9), 'a');
-        assert_eq!(hint_char(34), 'z');
-        assert_eq!(hint_index('0'), None);
-        assert_eq!(hint_index('A'), None);
+    fn extract_image_url_parses_fallback() {
+        assert_eq!(
+            extract_image_url("[img] a cat (https://x.com/c.png)"),
+            Some("https://x.com/c.png".to_string())
+        );
+        assert_eq!(
+            extract_image_url("[img] (https://x.com/c.png)"),
+            Some("https://x.com/c.png".to_string())
+        );
+        assert_eq!(extract_image_url("plain text [img] (x)"), None);
+        assert_eq!(extract_image_url("[img] no parens"), None);
+    }
+
+    #[test]
+    fn markdown_roundtrip() {
+        let html = "<h2>Title</h2><p>Hello <b>bold</b> <a href=\"https://e.com\">link</a></p>";
+        let md = crate::fetch::html_to_markdown(html);
+        assert!(md.contains("Title"), "got: {md}");
+        assert!(md.contains("**bold**"), "got: {md}");
+        assert!(md.contains("[link](https://e.com)"), "got: {md}");
     }
 }

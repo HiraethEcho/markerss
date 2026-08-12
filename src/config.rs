@@ -18,11 +18,11 @@ use ratatui::style::{Color, Modifier, Style};
 pub const DEFAULT_NAV_PRESET: [&str; 6] =
     ["Unread", "Read Later", "Favourite", "Categories", "Tags", "Saved"];
 
-/// App colors: markdown element theme + pane accent/dim colors.
+/// App colors: markdown styles + pane accent/dim colors.
 /// Loaded from the optional `theme` file (TOML, named colors).
 #[derive(Debug, Clone)]
 pub struct ThemeColors {
-    pub md: the_other_tui_markdown::Theme,
+    pub styles: MdStyleSheet,
     pub accent: Color,
     pub dim: Color,
 }
@@ -30,10 +30,54 @@ pub struct ThemeColors {
 impl Default for ThemeColors {
     fn default() -> Self {
         Self {
-            md: the_other_tui_markdown::Theme::default(),
+            styles: MdStyleSheet::default(),
             accent: Color::Yellow,
             dim: Color::DarkGray,
         }
+    }
+}
+
+/// tui-markdown StyleSheet mapping every element to the app palette.
+#[derive(Debug, Clone)]
+pub struct MdStyleSheet {
+    pub accent: Color,
+    pub dim: Color,
+}
+
+impl Default for MdStyleSheet {
+    fn default() -> Self {
+        Self { accent: Color::Yellow, dim: Color::DarkGray }
+    }
+}
+
+impl tui_markdown::StyleSheet for MdStyleSheet {
+    fn heading(&self, level: u8) -> Style {
+        let c = if level <= 2 { self.accent } else { Color::Blue };
+        Style::new().fg(c).add_modifier(Modifier::BOLD)
+    }
+    fn code(&self) -> Style {
+        Style::new().fg(Color::Yellow)
+    }
+    fn link(&self) -> Style {
+        Style::new().fg(self.accent).add_modifier(Modifier::UNDERLINED)
+    }
+    fn blockquote(&self) -> Style {
+        Style::new().fg(self.dim).add_modifier(Modifier::ITALIC)
+    }
+    fn table_header(&self) -> Style {
+        Style::new().fg(self.accent).add_modifier(Modifier::BOLD)
+    }
+    fn table_cell(&self) -> Style {
+        Style::default()
+    }
+    fn table_border(&self) -> Style {
+        Style::new().fg(self.dim)
+    }
+    fn image_alt(&self) -> Style {
+        Style::new().fg(self.dim)
+    }
+    fn code_block_fence(&self) -> &str {
+        ""
     }
 }
 
@@ -58,31 +102,13 @@ impl ThemeColors {
             Ok(r) => r,
             Err(_) => return t,
         };
-        let bold = |c: Color| Style::new().fg(c).add_modifier(Modifier::BOLD);
-        if let Some(c) = raw.h1.as_deref().and_then(color_from_str) {
-            t.md.h1 = bold(c);
-        }
-        if let Some(c) = raw.h2.as_deref().and_then(color_from_str) {
-            t.md.h2 = Style::new().fg(c).add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
-        }
-        if let Some(c) = raw.h3.as_deref().and_then(color_from_str) {
-            t.md.h3 = bold(c);
-        }
-        if let Some(c) = raw.code.as_deref().and_then(color_from_str) {
-            t.md.inline_code = Style::new().fg(c);
-            t.md.code_block = Style::new().fg(c);
-        }
-        if let Some(c) = raw.quote.as_deref().and_then(color_from_str) {
-            t.md.block_quote = Style::new().fg(c).add_modifier(Modifier::ITALIC);
-        }
-        if let Some(c) = raw.link.as_deref().and_then(color_from_str) {
-            t.md.link = Style::new().fg(c).add_modifier(Modifier::UNDERLINED);
-        }
         if let Some(c) = raw.accent.as_deref().and_then(color_from_str) {
             t.accent = c;
+            t.styles.accent = c;
         }
         if let Some(c) = raw.dim.as_deref().and_then(color_from_str) {
             t.dim = c;
+            t.styles.dim = c;
         }
         t
     }
@@ -447,8 +473,7 @@ mod advanced_tests {
         std::fs::write(&path, "accent = \"green\"\nh1 = \"red\"\ncode = \"cyan\"\n").ok();
         let t = ThemeColors::load(Some(&path));
         assert_eq!(t.accent, Color::Green);
-        assert_eq!(t.md.h1.fg, Some(Color::Red));
-        assert_eq!(t.md.inline_code.fg, Some(Color::Cyan));
+        assert_eq!(t.styles.accent, Color::Green);
         std::fs::remove_dir_all(&dir).ok();
     }
 }
