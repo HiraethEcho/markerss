@@ -18,6 +18,58 @@ use ratatui::style::{Color, Modifier, Style};
 pub const DEFAULT_NAV_PRESET: [&str; 6] =
     ["Unread", "Read Later", "Favourite", "Categories", "Tags", "Saved"];
 
+/// Default key map: action name → key sequences (1-2 chars, or `<special>`).
+pub const DEFAULT_KEYS: &[(&str, &[&str])] = &[
+    ("open", &["l", "<enter>", "<right>"]),
+    ("back", &["h", "q", "<esc>", "<left>"]),
+    ("quit", &["Q"]),
+    ("refresh", &["r"]),
+    ("refresh_all", &["R"]),
+    ("toggle_read", &["a"]),
+    ("mark_all_read", &["A"]),
+    ("export", &["e"]),
+    ("browser", &["o"]),
+    ("favourite", &["F"]),
+    ("read_later", &["L"]),
+    ("saved", &["S"]),
+    ("new_feed", &["N"]),
+    ("delete", &["D"]),
+    ("rename", &["M"]),
+    ("edit_tags", &["T"]),
+    ("help", &["?"]),
+    ("focus_next", &["<tab>"]),
+    ("focus_prev", &["<backtab>"]),
+    ("search", &["/"]),
+    ("jump_top", &["gg"]),
+    ("jump_bottom", &["G"]),
+    ("next_unread", &["J"]),
+    ("prev_unread", &["K"]),
+    ("parent_next", &["n"]),
+    ("parent_prev", &["p"]),
+    ("copy_item_url", &["yy"]),
+    ("copy_item_title", &["yn"]),
+    ("copy_feed_url", &["yp"]),
+    ("sort_time", &["st"]),
+    ("sort_title", &["sn"]),
+    ("sort_feed", &["sf"]),
+    ("sort_unread", &["su"]),
+    ("sort_time_rev", &["sT"]),
+    ("sort_title_rev", &["sN"]),
+    ("sort_feed_rev", &["sF"]),
+    ("sort_unread_rev", &["sU"]),
+    ("cycle_preset", &["t"]),
+    ("import_opml", &["i"]),
+    ("export_opml", &["x"]),
+];
+
+/// Default keybindings as a HashMap<String, Vec<String>>.
+pub fn default_keybindings() -> std::collections::HashMap<String, Vec<String>> {
+    DEFAULT_KEYS
+        .iter()
+        .map(|(a, ks)| (a.to_string(), ks.iter().map(|k| k.to_string()).collect()))
+        .collect()
+}
+
 /// App colors: markdown styles + pane accent/dim colors.
 /// Loaded from the optional `theme` file (TOML, named colors).
 #[derive(Debug, Clone)]
@@ -218,7 +270,7 @@ impl Config {
             sort: Vec::new(),
             foldlevel: None,
             reading_width: 0,
-            keybindings: std::collections::HashMap::new(),
+            keybindings: default_keybindings(),
             config_dir: config_dir.clone(),
         };
 
