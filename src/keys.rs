@@ -67,7 +67,9 @@ impl Action {
 
     /// Parse a key string → KeyCode ("l", "enter", "esc", "tab", "?", …).
     pub(crate) fn parse_key(s: &str) -> Option<KeyCode> {
-        Some(match s.trim().to_ascii_lowercase().as_str() {
+        let s = s.trim().to_ascii_lowercase();
+        let s = s.strip_prefix('<').and_then(|x| x.strip_suffix('>')).unwrap_or(&s);
+        Some(match s {
             "enter" => KeyCode::Enter,
             "esc" => KeyCode::Esc,
             "tab" => KeyCode::Tab,
@@ -87,12 +89,15 @@ impl Action {
 
 /// Build the user keymap: key → action (invalid entries skipped).
 pub(crate) fn build_keymap(
-    raw: &std::collections::HashMap<String, String>,
+    raw: &std::collections::HashMap<String, Vec<String>>,
 ) -> std::collections::HashMap<KeyCode, Action> {
     let mut map = std::collections::HashMap::new();
-    for (action, key) in raw {
-        if let (Some(a), Some(k)) = (Action::from_str(action), Action::parse_key(key)) {
-            map.insert(k, a);
+    for (action, keys) in raw {
+        let Some(a) = Action::from_str(action) else { continue };
+        for key in keys {
+            if let Some(k) = Action::parse_key(key) {
+                map.insert(k, a);
+            }
         }
     }
     map
@@ -846,11 +851,20 @@ mod tests {
     #[test]
     fn keymap_skips_invalid() {
         let mut raw = std::collections::HashMap::new();
-        raw.insert("open".to_string(), "o".to_string());
-        raw.insert("bogus".to_string(), "x".to_string());
-        raw.insert("help".to_string(), "??".to_string());
+        raw.insert("open".to_string(), vec!["o".to_string(), "<enter>".to_string()]);
+        raw.insert("bogus".to_string(), vec!["x".to_string()]);
+        raw.insert("help".to_string(), vec!["??".to_string()]);
         let m = build_keymap(&raw);
-        assert_eq!(m.len(), 1);
+        assert_eq!(m.len(), 2); // o + enter, both → open
         assert_eq!(m.get(&KeyCode::Char('o')), Some(&Action::Open));
+        assert_eq!(m.get(&KeyCode::Enter), Some(&Action::Open));
+    }
+
+    #[test]
+    fn parse_angle_keys() {
+        assert_eq!(Action::parse_key("<enter>"), Some(KeyCode::Enter));
+        assert_eq!(Action::parse_key("<esc>"), Some(KeyCode::Esc));
+        assert_eq!(Action::parse_key("<TAB>"), Some(KeyCode::Tab));
+        assert_eq!(Action::parse_key("<space>"), Some(KeyCode::Char(' ')));
     }
 }
