@@ -196,8 +196,6 @@ struct RawConfig {
     pane_ratio: Option<Vec<f64>>,
     nav_presets: Option<Vec<Vec<String>>>,
     default_view: Option<String>,
-    images: Option<bool>,
-    proxy: Option<String>,
     keybindings: Option<std::collections::HashMap<String, KeySpec>>,
     sort: Option<Vec<String>>,
     foldlevel: Option<usize>,
@@ -237,8 +235,6 @@ pub struct Config {
     pub pane_ratio: [f64; 3],
     pub nav_presets: Vec<Vec<String>>,
     pub default_view: Option<String>,
-    pub images: bool,
-    pub proxy: Option<String>,
     pub sort: Vec<String>,
     pub foldlevel: Option<usize>,
     pub reading_width: u64,
@@ -265,8 +261,6 @@ impl Config {
             pane_ratio: [0.15, 0.15, 0.7],
             nav_presets: vec![DEFAULT_NAV_PRESET.iter().map(|s| s.to_string()).collect()],
             default_view: None,
-            images: false,
-            proxy: None,
             sort: Vec::new(),
             foldlevel: None,
             reading_width: 0,
@@ -331,10 +325,6 @@ impl Config {
             }
         }
         self.default_view = raw.default_view;
-        if let Some(v) = raw.images {
-            self.images = v;
-        }
-        self.proxy = raw.proxy;
     }
 }
 
