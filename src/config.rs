@@ -205,7 +205,7 @@ impl Config {
             pane_ratio: [0.15, 0.15, 0.7],
             nav_presets: vec![DEFAULT_NAV_PRESET.iter().map(|s| s.to_string()).collect()],
             default_view: None,
-            images: true,
+            images: false,
             proxy: None,
             sort: Vec::new(),
             foldlevel: None,
