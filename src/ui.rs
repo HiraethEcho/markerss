@@ -500,6 +500,9 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
         .sum();
     let max_scroll = est_lines.saturating_sub(body.height);
     let scroll = app.article_scroll.min(max_scroll);
+    // write back so j-at-bottom doesn't inflate article_scroll (k would need
+    // many presses to return) — this is the draw that clamps the state
+    app.article_scroll = scroll;
     let total_lines = body_text.lines.len() as u16;
     let para = Paragraph::new(body_text)
         .wrap(Wrap { trim: true })
