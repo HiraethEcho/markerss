@@ -295,12 +295,19 @@ fn expand_images(
     let mut out_lines: Vec<Line<'static>> = Vec::new();
     let mut placements: Vec<(u16, String, u16)> = Vec::new();
     let mut spawn: Vec<String> = Vec::new();
+    let mut img_count = 0usize;
     for line in text.lines {
         let t: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         let Some(url) = extract_image_url(&t) else {
             out_lines.push(line);
             continue;
         };
+        // safety caps: avoid heavy renders that can stall terminals
+        if img_count >= 8 {
+            out_lines.push(Line::from(""));
+            continue;
+        }
+        img_count += 1;
         if !app.images.cache.contains_key(&url)
             && !app.images.pending.contains(&url)
             && !app.images.failed.contains(&url)
@@ -326,7 +333,7 @@ fn expand_images(
             .images
             .protocols
             .get(&url)
-            .map(|p| p.size().height.max(1))
+            .map(|p| p.size().height.clamp(1, 20))
             .unwrap_or(1);
         let start = out_lines.len() as u16;
         for _ in 0..h {
