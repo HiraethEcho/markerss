@@ -251,6 +251,15 @@ impl Config {
         if let Some(k) = raw.keybindings {
             self.keybindings = k;
         }
+        // optional standalone keybindings.toml — overrides config.toml's map
+        let kb_path = self.config_dir.join("keybindings.toml");
+        if let Ok(text) = fs::read_to_string(&kb_path) {
+            if let Ok(raw_kb) = toml::from_str::<RawConfig>(&text) {
+                if let Some(k) = raw_kb.keybindings {
+                    self.keybindings = k;
+                }
+            }
+        }
         if let Some(v) = raw.pane_ratio {
             if v.len() == 3 {
                 self.pane_ratio = [v[0], v[1], v[2]];
