@@ -368,10 +368,11 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     // (h2md → tui-markdown pipeline).
     // Links render as underlined alt text (no URL); images as [img].
     let body_text = if content_ready {
-        // render once per guid; reuse until the item's content changes
-        if !matches!(&app.article_render, Some((g, _)) if g == &item.guid) {
+        // render once per (feed_url, guid); reuse until the item's content changes
+        let key = (url.clone(), item.guid.clone());
+        if !matches!(&app.article_render, Some((k, _)) if k == &key) {
             let t = render_article_text(app, &item);
-            app.article_render = Some((item.guid.clone(), t.clone()));
+            app.article_render = Some((key, t.clone()));
         }
         app.article_render.as_ref().map(|(_, t)| t.clone()).unwrap_or_default()
     } else if app.fetching {
