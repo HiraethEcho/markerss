@@ -37,14 +37,7 @@ pub(crate) enum Action {
     CopyItemUrl,
     CopyItemTitle,
     CopyFeedUrl,
-    SortTime,
-    SortTitle,
-    SortFeed,
-    SortUnread,
-    SortTimeRev,
-    SortTitleRev,
-    SortFeedRev,
-    SortUnreadRev,
+    Sort { level: &'static str, reverse: bool },
     FocusPrev,
     CyclePreset,
     ImportOpml,
@@ -83,14 +76,14 @@ impl Action {
             "copy_item_url" => Action::CopyItemUrl,
             "copy_item_title" => Action::CopyItemTitle,
             "copy_feed_url" => Action::CopyFeedUrl,
-            "sort_time" => Action::SortTime,
-            "sort_title" => Action::SortTitle,
-            "sort_feed" => Action::SortFeed,
-            "sort_unread" => Action::SortUnread,
-            "sort_time_rev" => Action::SortTimeRev,
-            "sort_title_rev" => Action::SortTitleRev,
-            "sort_feed_rev" => Action::SortFeedRev,
-            "sort_unread_rev" => Action::SortUnreadRev,
+            "sort_time" => Action::Sort { level: "time", reverse: false },
+            "sort_title" => Action::Sort { level: "title", reverse: false },
+            "sort_feed" => Action::Sort { level: "feed", reverse: false },
+            "sort_unread" => Action::Sort { level: "unread", reverse: false },
+            "sort_time_rev" => Action::Sort { level: "time", reverse: true },
+            "sort_title_rev" => Action::Sort { level: "title", reverse: true },
+            "sort_feed_rev" => Action::Sort { level: "feed", reverse: true },
+            "sort_unread_rev" => Action::Sort { level: "unread", reverse: true },
             "focus_prev" => Action::FocusPrev,
             "cycle_preset" => Action::CyclePreset,
             "import_opml" => Action::ImportOpml,
@@ -174,10 +167,11 @@ impl App {
             Action::MarkAllRead => self.mark_all_read(),
             Action::Export => self.start_export(),
             Action::Browser => self.open_browser(),
-            Action::Favourite if self.focus == 0 => self.toggle_favourite_feed(),
-            Action::Favourite if self.focus == 2 => {
-                self.fullscreen = !self.fullscreen;
-            }
+            Action::Favourite => match self.focus {
+                0 => self.toggle_favourite_feed(),
+                2 => self.fullscreen = !self.fullscreen,
+                _ => {}
+            },
             Action::ReadLater if self.focus >= 1 => self.toggle_item_flag("read_later"),
             Action::Saved if self.focus >= 1 => self.toggle_item_flag("saved"),
             Action::NewFeed if self.focus == 0 => self.start_input(InputMode::AddUrl),
@@ -279,14 +273,9 @@ impl App {
                     self.status = "copied feed url".into();
                 }
             }
-            Action::SortTime if self.focus == 1 => self.push_sort("time", false),
-            Action::SortTitle if self.focus == 1 => self.push_sort("title", false),
-            Action::SortFeed if self.focus == 1 => self.push_sort("feed", false),
-            Action::SortUnread if self.focus == 1 => self.push_sort("unread", false),
-            Action::SortTimeRev if self.focus == 1 => self.push_sort("time", true),
-            Action::SortTitleRev if self.focus == 1 => self.push_sort("title", true),
-            Action::SortFeedRev if self.focus == 1 => self.push_sort("feed", true),
-            Action::SortUnreadRev if self.focus == 1 => self.push_sort("unread", true),
+            Action::Sort { level, reverse } if self.focus == 1 => {
+                self.push_sort(level, reverse)
+            }
             Action::FocusPrev => self.focus = (self.focus + 2) % 3,
             Action::CyclePreset if self.focus == 0 => self.cycle_preset(),
             Action::ImportOpml => self.start_input(InputMode::ImportOpml),
@@ -862,7 +851,10 @@ mod tests {
         raw.insert("sort_time".to_string(), vec!["st".to_string()]);
         let m = build_keymap(&raw);
         assert_eq!(m.get(&vec![KeyCode::Char('g'), KeyCode::Char('g')]), Some(&Action::JumpTop));
-        assert_eq!(m.get(&vec![KeyCode::Char('s'), KeyCode::Char('t')]), Some(&Action::SortTime));
+        assert_eq!(
+            m.get(&vec![KeyCode::Char('s'), KeyCode::Char('t')]),
+            Some(&Action::Sort { level: "time", reverse: false })
+        );
         // case-sensitive: sT ≠ st
         assert!(m.get(&vec![KeyCode::Char('s'), KeyCode::Char('T')]).is_none());
         assert!(m.get(&vec![KeyCode::Char('g')]).is_none()); // prefix only
