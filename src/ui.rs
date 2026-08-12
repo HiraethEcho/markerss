@@ -473,47 +473,7 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     };
     let x_off = (body.width - content_w) / 2;
 
-    // clamp scroll to the estimated wrapped content height (tui-markdown
-    // emits unwrapped logical lines; G must reach the wrapped bottom)
     let content_w_est = content_w.max(1) as usize;
-    let est_lines: u16 = body_text
-        .lines
-        .iter()
-        .map(|l| {
-            let t: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
-            display_width(&t).div_ceil(content_w_est).max(1) as u16
-        })
-        .sum();
-    let max_scroll = est_lines.saturating_sub(body.height);
-    let scroll = app.article_scroll.min(max_scroll);
-    let para = Paragraph::new(body_text.clone())
-        .wrap(Wrap { trim: true })
-        .scroll((scroll, 0));
-    let content_area = Rect {
-        x: body.x + x_off,
-        y: body.y,
-        width: content_w,
-        height: body.height,
-    };
-    frame.render_widget(para, content_area);
-
-    // scrollbar on the pane's right edge (rough estimate of wrapped lines)
-    let total = body_text.lines.len() as u16;
-    if total > body.height && scroll > 0 {
-        let pos = scroll;
-        let bar_h = ((body.height as f32 * body.height as f32 / total as f32).max(1.0)) as u16;
-        let bar_y = (pos as f32 * (body.height - bar_h) as f32 / max_scroll as f32) as u16;
-        let sb_area = Rect {
-            x: body.x + body.width - 1,
-            y: body.y + bar_y,
-            width: 1,
-            height: bar_h,
-        };
-        frame.render_widget(
-            Paragraph::new(" ").style(Style::default().bg(app.theme.dim)),
-            sb_area,
-        );
-    }
 
     frame.render_widget(block, area);
 
@@ -540,7 +500,8 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
         .sum();
     let max_scroll = est_lines.saturating_sub(body.height);
     let scroll = app.article_scroll.min(max_scroll);
-    let para = Paragraph::new(body_text.clone())
+    let total_lines = body_text.lines.len() as u16;
+    let para = Paragraph::new(body_text)
         .wrap(Wrap { trim: true })
         .scroll((scroll, 0));
     let content_area = Rect {
@@ -550,6 +511,24 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
         height: body.height,
     };
     frame.render_widget(para, content_area);
+
+    // scrollbar on the pane's right edge
+    let total = total_lines;
+    if total > body.height && scroll > 0 {
+        let bar_h = ((body.height as f32 * body.height as f32 / total as f32).max(1.0)) as u16;
+        let bar_y = (scroll as f32 * (body.height - bar_h) as f32 / max_scroll as f32) as u16;
+        let sb_area = Rect {
+            x: body.x + body.width - 1,
+            y: body.y + bar_y,
+            width: 1,
+            height: bar_h,
+        };
+        frame.render_widget(
+            Paragraph::new(" ").style(Style::default().bg(app.theme.dim)),
+            sb_area,
+        );
+    }
+
     for (line, url, h) in &placements {
         if let Some(proto) = app.images.protocols.get(url) {
             let y_pos = body.y + line.saturating_sub(scroll);

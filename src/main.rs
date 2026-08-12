@@ -1130,16 +1130,33 @@ fn main() -> io::Result<()> {
 }
 
 fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()> {
+    let mut redraw = true;
     while app.running {
-        terminal.draw(|f| render(f, app))?;
+        // draw only when something changed (key, message, or first frame) —
+        // avoids the per-tick full repaint that made scrolling lag
+        if redraw {
+            terminal.draw(|f| render(f, app))?;
+            redraw = false;
+        }
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(k) = event::read()? {
                 if k.kind == KeyEventKind::Press {
                     app.on_key(k.code, k.modifiers);
+                    redraw = true;
+                }
+            }
+            // swallow resize/other events, still redraw
+            while event::poll(Duration::from_millis(0))? {
+                if let Event::Key(k) = event::read()? {
+                    if k.kind == KeyEventKind::Press {
+                        app.on_key(k.code, k.modifiers);
+                        redraw = true;
+                    }
                 }
             }
         }
         while let Ok(msg) = app.rx.try_recv() {
+            redraw = true;
             match msg {
                 Msg::FeedRefreshed { url, result, full } => app.handle_feed_refreshed(url, result, full),
                 Msg::ArticleFetched { url, guid, result } => {
