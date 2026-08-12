@@ -32,6 +32,8 @@ pub(crate) enum Action {
     JumpBottom,
     NextUnread,
     PrevUnread,
+    ParentNext,
+    ParentPrev,
 }
 
 impl Action {
@@ -61,6 +63,8 @@ impl Action {
             "jump_bottom" => Action::JumpBottom,
             "next_unread" => Action::NextUnread,
             "prev_unread" => Action::PrevUnread,
+            "parent_next" => Action::ParentNext,
+            "parent_prev" => Action::ParentPrev,
             _ => return None,
         })
     }
@@ -190,7 +194,44 @@ impl App {
             },
             Action::NextUnread => self.mark_read_and_jump(1),
             Action::PrevUnread => self.mark_read_and_jump(-1),
+            // parent navigation: article → list cursor, list → nav cursor
+            Action::ParentNext => match self.focus {
+                2 => self.move_list_sel(1),
+                1 => self.move_nav_sel(1),
+                _ => {}
+            },
+            Action::ParentPrev => match self.focus {
+                2 => self.move_list_sel(-1),
+                1 => self.move_nav_sel(-1),
+                _ => {}
+            },
             _ => {}
+        }
+    }
+
+    /// Move the list selection one step (article preview follows).
+    fn move_list_sel(&mut self, dir: isize) {
+        let n = self.scoped_items.len() as isize;
+        if n == 0 {
+            return;
+        }
+        let idx = self.list_sel as isize + dir;
+        if idx >= 0 && idx < n {
+            self.list_sel = idx as usize;
+            self.article_scroll = 0;
+        }
+    }
+
+    /// Move the nav selection one step (list preview follows).
+    fn move_nav_sel(&mut self, dir: isize) {
+        let n = self.tree_rows.len() as isize;
+        if n == 0 {
+            return;
+        }
+        let idx = self.tree_sel as isize + dir;
+        if idx >= 0 && idx < n {
+            self.tree_sel = idx as usize;
+            self.preview_scope();
         }
     }
 
@@ -336,6 +377,9 @@ impl App {
                     self.pending_g = true;
                 }
             }
+            // J/K: parent navigation (article → list, list → nav)
+            KeyCode::Char('J') => self.execute_action(Action::ParentNext),
+            KeyCode::Char('K') => self.execute_action(Action::ParentPrev),
             KeyCode::Char('G') => match self.focus {
                 0 => self.tree_sel = self.tree_rows.len().saturating_sub(1),
                 1 => {
