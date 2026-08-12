@@ -155,7 +155,12 @@ Directional movement: `h`/`q`/`esc` = LEFT, `l`/`enter` = RIGHT (+ arrow keys `�
 | d | nav | delete feed (press twice to confirm) |
 | M | nav | modify — feed custom title / category / tags (contextual) |
 | T | nav | edit feed tags (prefilled) |
-| F | nav / article | nav: favourite feed · article: toggle fullscreen |
+| F | nav / article | nav: favourite feed · article: toggle fullscreen (f freed) |
+| D | nav | delete feed (press twice to confirm) |
+| n/p | global | parent navigation: article → list cursor, list → nav cursor |
+| J/K | list | next/prev unread (mark read + jump) |
+| gg | nav+list+article | jump top |
+| yy/yn/yp | list+nav | copy item url / title / feed url |
 | L / S | list+article | toggle read-later / saved (again to cancel; L marks unread) |
 | t | nav | cycle nav preset |
 | r / R | global | partial refresh (current scope) / full refresh (rebuild) |
@@ -195,13 +200,12 @@ Advanced keys (planned, unbound or remapped — see Advanced): `gg/G`, `Ctrl+f/b
   - `browser` — which browser to open (default: `xdg-open`).
   - `refresh` — auto-on-startup on/off, interval (`interval_minutes`).
   - `nav_presets` — list of nav section arrays, e.g. `[["Unread", "Feeds"], ["Unread", "Later"]]`; replaces the preset list (first = initial).
-  - `images` — kitty image render on/off.
   - `foldlevel` — initial fold depth of nav Categories tree (0 = all folded).
   - `sort` — initial sort stack (max 3), e.g. `["unread", "time"]`, applied left-to-right; never rewritten by keypresses.
   - `fetch_timeout` — per-request timeout.
   - `max_items_per_feed` — cap items kept per feed.
-  - `proxy` — HTTP proxy.
-  - `keybindings` — map of `"action" = "key"` (single-key remaps run in addition to defaults, never intercepting ctrl chords): `open back quit refresh refresh_all toggle_read mark_all_read export browser favourite read_later saved new_feed delete rename edit_tags help focus_next search jump_top jump_bottom next_unread prev_unread`.
+  - `reading_width` — max article body columns (0 = fill pane).
+  - `keybindings` — map of action → key string or list (single keys, combos like `gg`, specials like `<enter>`), in config.toml `[keybindings]` or standalone `keybindings.toml` (replaces the config map). Combos match via a prefix buffer; ctrl chords are never rebindable. Actions: open back quit refresh refresh_all toggle_read mark_all_read export browser favourite read_later saved new_feed delete rename edit_tags help focus_next focus_prev search jump_top jump_bottom next_unread prev_unread parent_next parent_prev copy_item_url copy_item_title copy_feed_url sort_time sort_title sort_feed sort_unread sort_*_rev cycle_preset import_opml export_opml.
   - `default_view` — startup scope, e.g. `Feed:<url>` / `Category:<name>`.
 - Read at startup; defaults + XDG fallbacks when keys absent. No hot-reload in MVP.
 
@@ -333,7 +337,7 @@ Status per key — **[done]** rust implemented · **[dropped]** user removed · 
 - `zt` / `zz` / `zb` — scroll cursor to top / center / bottom (article). *(planned — scroll-only view, no cursor)*
 - `{` / `}` — jump prev / next paragraph (blank line) (article). *(planned)*
 - `[` / `]` — jump prev / next section (article headings h2/h3). *(planned)*
-- `gi` — toggle kitty image render (was `g`; `g` freed for `gg` top). *(planned — kitty deferred)*
+- ~~`gi` — kitty image render~~ — **[removed]** (unstable, default-off; removed entirely).
 - `zr` / `zm` — decrease / increase fold level by 1 (unfold/fold one level).
 - `zR` / `zM` — open all folds / close all folds.
 - `Ctrl+f` / `Ctrl+b` — full page down / up (list + article).
