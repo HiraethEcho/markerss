@@ -7,11 +7,9 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
-
-use crate::fetch;
 use crate::model::Item;
 use crate::util::{display_width, fmt_date};
-use crate::{App, InputMode, InputPrompt, Msg, Scope, TreeRow};
+use crate::{App, InputMode, InputPrompt, Scope, TreeRow};
 
 pub(crate) fn render(frame: &mut Frame, app: &mut App) {
     let [main, status_bar] = Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(frame.area());
@@ -284,87 +282,6 @@ fn render_article_text(app: &App, item: &Item) -> Text<'static> {
     Text::from(lines)
 }
 
-/// Replace `[img]` rows with blank rows sized to the decoded image height
-/// (cells), so the picture overlays empty space and text/layout stay exact.
-/// Returns (text_with_placeholders, placements[(start_line, url, height)]).
-fn expand_images(
-    app: &mut App,
-    text: Text<'static>,
-    content_w: u16,
-) -> (Text<'static>, Vec<(u16, String, u16)>) {
-    let mut out_lines: Vec<Line<'static>> = Vec::new();
-    let mut placements: Vec<(u16, String, u16)> = Vec::new();
-    let mut spawn: Vec<String> = Vec::new();
-    let mut img_count = 0usize;
-    for line in text.lines {
-        let t: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        let Some(url) = extract_image_url(&t) else {
-            out_lines.push(line);
-            continue;
-        };
-        // safety caps: avoid heavy renders that can stall terminals
-        if img_count >= 8 {
-            out_lines.push(Line::from(""));
-            continue;
-        }
-        img_count += 1;
-        if !app.images.cache.contains_key(&url)
-            && !app.images.pending.contains(&url)
-            && !app.images.failed.contains(&url)
-        {
-            app.images.pending.insert(url.clone());
-            spawn.push(url.clone());
-        }
-        if let Some(img) = app.images.cache.get(&url).cloned() {
-            if let Some(picker) = app.images.picker.as_ref() {
-                if !app.images.protocols.contains_key(&url) {
-                    if let Ok(p) = picker.new_protocol(
-                        img,
-                        ratatui::layout::Size::new(content_w, app.article_area.height.min(12)),
-                        ratatui_image::Resize::Fit(None),
-                    ) {
-                        app.images.protocols.insert(url.clone(), p);
-                    }
-                }
-            }
-        }
-        // measured height (cells) when decoded, else 1 row placeholder
-        let h = app
-            .images
-            .protocols
-            .get(&url)
-            .map(|p| p.size().height.clamp(1, 20))
-            .unwrap_or(1);
-        let start = out_lines.len() as u16;
-        for _ in 0..h {
-            out_lines.push(Line::from(""));
-        }
-        placements.push((start, url, h));
-    }
-    for url in spawn {
-        let tx = app.tx.clone();
-        let timeout = app.cfg.fetch_timeout;
-        let proxy = app.cfg.proxy.clone();
-        std::thread::spawn(move || {
-            let data = fetch::fetch_raw(&url, timeout, proxy.as_deref());
-            tx.send(Msg::ImageLoaded { url, data }).ok();
-        });
-    }
-    (Text::from(out_lines), placements)
-}
-
-/// Parse `[img] desc (url)` fallback rows → image url.
-fn extract_image_url(line: &str) -> Option<String> {
-    let rest = line.trim_start().strip_prefix("[img]")?;
-    let open = rest.rfind('(')?;
-    let close = rest.rfind(')')?;
-    if close > open {
-        Some(rest[open + 1..close].trim().to_string())
-    } else {
-        None
-    }
-}
-
 /// Header text: title / meta (feed · date · read · flags) / url / summary.
 fn article_header<'a>(app: &App, url: &str, item: &'a Item, feed_name: &'a str) -> Text<'a> {
     let title_style = Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD);
@@ -481,15 +398,7 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     // Replace `[img]` rows with image-height blank rows (exact layout) and
     // overlay decoded pictures on the blanks. `scroll` is clamped to the
     // expanded text so images never push the bottom out of reach.
-    let mut placements: Vec<(u16, String, u16)> = Vec::new();
-    let body_text = if content_ready && app.cfg.images {
-        let (t, pl) = expand_images(app, body_text, content_w);
-        placements = pl;
-        t
-    } else {
-        body_text
-    };
-    // clamp scroll to the (now expanded) wrapped content height
+    // clamp scroll to the estimated wrapped content height
     let est_lines: u16 = body_text
         .lines
         .iter()
@@ -532,20 +441,6 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
         );
     }
 
-    for (line, url, h) in &placements {
-        if let Some(proto) = app.images.protocols.get(url) {
-            let y_pos = body.y + line.saturating_sub(scroll);
-            if y_pos + *h <= body.y + body.height {
-                let img_area = Rect {
-                    x: body.x + x_off,
-                    y: y_pos,
-                    width: content_w,
-                    height: *h,
-                };
-                frame.render_widget(ratatui_image::Image::new(proto), img_area);
-            }
-        }
-    }
 }
 
 fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
@@ -628,20 +523,6 @@ fn pane_block<'a>(title: &'a str, focused: bool) -> Block<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn extract_image_url_parses_fallback() {
-        assert_eq!(
-            extract_image_url("[img] a cat (https://x.com/c.png)"),
-            Some("https://x.com/c.png".to_string())
-        );
-        assert_eq!(
-            extract_image_url("[img] (https://x.com/c.png)"),
-            Some("https://x.com/c.png".to_string())
-        );
-        assert_eq!(extract_image_url("plain text [img] (x)"), None);
-        assert_eq!(extract_image_url("[img] no parens"), None);
-    }
 
     #[test]
     fn markdown_roundtrip() {

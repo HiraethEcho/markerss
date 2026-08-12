@@ -41,7 +41,6 @@ enum Msg {
         full: bool,
     },
     ArticleFetched { url: String, guid: String, result: Result<String, String> },
-    ImageLoaded { url: String, data: Result<Vec<u8>, String> },
     RefreshTick,
 }
 
@@ -76,16 +75,6 @@ enum Scope {
     Category(String),
     Feed(String),
     Tag(String),
-}
-
-/// TUI image state: protocol picker + decoded cache + per-image protocols.
-#[derive(Default)]
-struct Images {
-    picker: Option<ratatui_image::picker::Picker>,
-    cache: std::collections::HashMap<String, image::DynamicImage>,
-    protocols: std::collections::HashMap<String, ratatui_image::protocol::Protocol>,
-    pending: std::collections::HashSet<String>,
-    failed: std::collections::HashSet<String>,
 }
 
 struct App {
@@ -129,7 +118,6 @@ struct App {
     search_query: String,
     keymap: std::collections::HashMap<Vec<KeyCode>, crate::keys::Action>,
     feed_errors: std::collections::HashMap<String, String>,
-    images: Images,
     input: Option<InputPrompt>,
     add_pending: Option<String>,
     add_pending_title: Option<String>,
@@ -197,7 +185,6 @@ impl App {
             search_query: String::new(),
             keymap,
             feed_errors: std::collections::HashMap::new(),
-            images: Images::default(),
             input: None,
             add_pending: None,
             add_pending_title: None,
@@ -521,12 +508,11 @@ impl App {
         self.fetching = true;
         self.status = format!("fetching {}", item.url);
         let timeout = self.cfg.fetch_timeout;
-        let proxy = self.cfg.proxy.clone();
         let tx = self.tx.clone();
         let url = item.url.clone();
         let guid = item.guid.clone();
         thread::spawn(move || {
-            let result = fetch::fetch_article(&url, timeout, proxy.as_deref());
+            let result = fetch::fetch_article(&url, timeout);
             tx.send(Msg::ArticleFetched { url, guid, result }).ok();
         });
     }
@@ -761,10 +747,9 @@ impl App {
     fn refresh_feed_thread(&mut self, url: String, full: bool) {
         self.pending_refreshes += 1;
         let timeout = self.cfg.fetch_timeout;
-        let proxy = self.cfg.proxy.clone();
         let tx = self.tx.clone();
         thread::spawn(move || {
-            let result = fetch::refresh_feed(&url, timeout, proxy.as_deref());
+            let result = fetch::refresh_feed(&url, timeout);
             tx.send(Msg::FeedRefreshed { url, result, full }).ok();
         });
     }
@@ -1118,8 +1103,6 @@ fn main() -> io::Result<()> {
     }
 
     let mut terminal = ratatui::init();
-    // query terminal for kitty/sixel/halfblock image support (after alt-screen)
-    app.images.picker = ratatui_image::picker::Picker::from_query_stdio().ok();
     let result = run(&mut terminal, &mut app);
     ratatui::restore();
     result
@@ -1158,26 +1141,6 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()>
                 Msg::ArticleFetched { url, guid, result } => {
                     app.handle_article_fetched(url, guid, result)
                 }
-                Msg::ImageLoaded { url, data } => match data {
-                    Ok(bytes) => match image::load_from_memory(&bytes) {
-                        Ok(img) => {
-                            app.images.pending.remove(&url);
-                            app.images.cache.insert(url, img);
-                            // re-layout: the [img] row grows to the image height
-                            app.article_render = None;
-                        }
-                        Err(e) => {
-                            app.images.pending.remove(&url);
-                            app.images.failed.insert(url);
-                            app.status = format!("image decode failed: {e}");
-                        }
-                    },
-                    Err(e) => {
-                        app.images.pending.remove(&url);
-                        app.images.failed.insert(url);
-                        app.status = format!("image fetch failed: {e}");
-                    }
-                },
                 Msg::RefreshTick => app.refresh_all(false),
             }
         }
