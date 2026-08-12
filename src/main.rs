@@ -1150,6 +1150,8 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()>
                         Ok(img) => {
                             app.images.pending.remove(&url);
                             app.images.cache.insert(url, img);
+                            // re-layout: the [img] row grows to the image height
+                            app.article_render = None;
                         }
                         Err(e) => {
                             app.images.pending.remove(&url);

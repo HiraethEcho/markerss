@@ -7,7 +7,6 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
-use std::thread;
 
 use crate::fetch;
 use crate::model::Item;
@@ -285,6 +284,68 @@ fn render_article_text(app: &App, item: &Item) -> Text<'static> {
     Text::from(lines)
 }
 
+/// Replace `[img]` rows with blank rows sized to the decoded image height
+/// (cells), so the picture overlays empty space and text/layout stay exact.
+/// Returns (text_with_placeholders, placements[(start_line, url, height)]).
+fn expand_images(
+    app: &mut App,
+    text: Text<'static>,
+    content_w: u16,
+) -> (Text<'static>, Vec<(u16, String, u16)>) {
+    let mut out_lines: Vec<Line<'static>> = Vec::new();
+    let mut placements: Vec<(u16, String, u16)> = Vec::new();
+    let mut spawn: Vec<String> = Vec::new();
+    for line in text.lines {
+        let t: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        let Some(url) = extract_image_url(&t) else {
+            out_lines.push(line);
+            continue;
+        };
+        if !app.images.cache.contains_key(&url)
+            && !app.images.pending.contains(&url)
+            && !app.images.failed.contains(&url)
+        {
+            app.images.pending.insert(url.clone());
+            spawn.push(url.clone());
+        }
+        if let Some(img) = app.images.cache.get(&url).cloned() {
+            if let Some(picker) = app.images.picker.as_ref() {
+                if !app.images.protocols.contains_key(&url) {
+                    if let Ok(p) = picker.new_protocol(
+                        img,
+                        ratatui::layout::Size::new(content_w, app.article_area.height.min(12)),
+                        ratatui_image::Resize::Fit(None),
+                    ) {
+                        app.images.protocols.insert(url.clone(), p);
+                    }
+                }
+            }
+        }
+        // measured height (cells) when decoded, else 1 row placeholder
+        let h = app
+            .images
+            .protocols
+            .get(&url)
+            .map(|p| p.size().height.max(1))
+            .unwrap_or(1);
+        let start = out_lines.len() as u16;
+        for _ in 0..h {
+            out_lines.push(Line::from(""));
+        }
+        placements.push((start, url, h));
+    }
+    for url in spawn {
+        let tx = app.tx.clone();
+        let timeout = app.cfg.fetch_timeout;
+        let proxy = app.cfg.proxy.clone();
+        std::thread::spawn(move || {
+            let data = fetch::fetch_raw(&url, timeout, proxy.as_deref());
+            tx.send(Msg::ImageLoaded { url, data }).ok();
+        });
+    }
+    (Text::from(out_lines), placements)
+}
+
 /// Parse `[img] desc (url)` fallback rows → image url.
 fn extract_image_url(line: &str) -> Option<String> {
     let rest = line.trim_start().strip_prefix("[img]")?;
@@ -449,75 +510,51 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
 
     frame.render_widget(block, area);
 
-    // ── TUI images (kitty/sixel/halfblocks) ──────────────────────────────
-    // Walk the body lines with a wrap estimate to find `[img]` rows; download
-    // missing images in the background; overlay decoded ones.
-    if content_ready && app.cfg.images {
-        let mut y = 0u16; // estimated wrapped row offset
-        let mut img_rows: Vec<(u16, String)> = Vec::new();
-        for line in body_text.lines.iter() {
-            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-            if let Some(url) = extract_image_url(&text) {
-                img_rows.push((y, url));
-                y += 1;
-            } else {
-                let w = display_width(&text);
-                y += (w / content_w.max(1) as usize).max(1) as u16;
+    // ── TUI images ─────────────────────────────────────────────────────────
+    // Replace `[img]` rows with image-height blank rows (exact layout) and
+    // overlay decoded pictures on the blanks. `scroll` is clamped to the
+    // expanded text so images never push the bottom out of reach.
+    let mut placements: Vec<(u16, String, u16)> = Vec::new();
+    let body_text = if content_ready && app.cfg.images {
+        let (t, pl) = expand_images(app, body_text, content_w);
+        placements = pl;
+        t
+    } else {
+        body_text
+    };
+    // clamp scroll to the (now expanded) wrapped content height
+    let est_lines: u16 = body_text
+        .lines
+        .iter()
+        .map(|l| {
+            let t: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
+            display_width(&t).div_ceil(content_w_est).max(1) as u16
+        })
+        .sum();
+    let max_scroll = est_lines.saturating_sub(body.height);
+    let scroll = app.article_scroll.min(max_scroll);
+    let para = Paragraph::new(body_text.clone())
+        .wrap(Wrap { trim: true })
+        .scroll((scroll, 0));
+    let content_area = Rect {
+        x: body.x + x_off,
+        y: body.y,
+        width: content_w,
+        height: body.height,
+    };
+    frame.render_widget(para, content_area);
+    for (line, url, h) in &placements {
+        if let Some(proto) = app.images.protocols.get(url) {
+            let y_pos = body.y + line.saturating_sub(scroll);
+            if y_pos + *h <= body.y + body.height {
+                let img_area = Rect {
+                    x: body.x + x_off,
+                    y: y_pos,
+                    width: content_w,
+                    height: *h,
+                };
+                frame.render_widget(ratatui_image::Image::new(proto), img_area);
             }
-        }
-        if img_rows.is_empty() {
-            return; // nothing to do
-        }
-        let mut spawn = Vec::new();
-        for (row, url) in &img_rows {
-            // request missing images (once per url)
-            if !app.images.cache.contains_key(url)
-                && !app.images.pending.contains(url)
-                && !app.images.failed.contains(url)
-            {
-                app.images.pending.insert(url.clone());
-                spawn.push(url.clone());
-            }
-            // overlay cached images at the estimated row
-            if let Some(img) = app.images.cache.get(url) {
-                let y_pos = body.y + row.saturating_sub(scroll);
-                if y_pos + 1 < body.y + body.height {
-                    if let Some(picker) = &app.images.picker {
-                        if !app.images.protocols.contains_key(url) {
-                            match picker.new_protocol(
-                                img.clone(),
-                                ratatui::layout::Size::new(
-                                    content_w,
-                                    body.height.min(12),
-                                ),
-                                ratatui_image::Resize::Fit(None),
-                            ) {
-                                Ok(p) => {
-                                    app.images.protocols.insert(url.clone(), p);
-                                }
-                                Err(_) => continue, // unsupported image — skip
-                            }
-                        }
-                        let proto = app.images.protocols.get(url).unwrap();
-                        let img_area = Rect {
-                            x: body.x + x_off,
-                            y: y_pos,
-                            width: content_w,
-                            height: proto.size().height,
-                        };
-                        frame.render_widget(ratatui_image::Image::new(proto), img_area);
-                    }
-                }
-            }
-        }
-        for url in spawn {
-            let tx = app.tx.clone();
-            let timeout = app.cfg.fetch_timeout;
-            let proxy = app.cfg.proxy.clone();
-            thread::spawn(move || {
-                let data = fetch::fetch_raw(&url, timeout, proxy.as_deref());
-                tx.send(Msg::ImageLoaded { url, data }).ok();
-            });
         }
     }
 }
