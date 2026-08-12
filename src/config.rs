@@ -146,7 +146,7 @@ struct RawConfig {
     default_view: Option<String>,
     images: Option<bool>,
     proxy: Option<String>,
-    keybindings: Option<std::collections::HashMap<String, String>>,
+    keybindings: Option<std::collections::HashMap<String, KeySpec>>,
     sort: Option<Vec<String>>,
     foldlevel: Option<usize>,
     reading_width: Option<u64>,
@@ -157,6 +157,14 @@ struct RawConfig {
 enum RefreshCfg {
     Bool(bool),
     Table { interval_minutes: Option<u64> },
+}
+
+/// A binding value: `"l"` or `["l", "<enter>"]` (multiple keys per action).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum KeySpec {
+    One(String),
+    Many(Vec<String>),
 }
 
 
@@ -182,7 +190,7 @@ pub struct Config {
     pub sort: Vec<String>,
     pub foldlevel: Option<usize>,
     pub reading_width: u64,
-    pub keybindings: std::collections::HashMap<String, String>,
+    pub keybindings: std::collections::HashMap<String, Vec<String>>,
 }
 
 impl Config {
@@ -249,7 +257,16 @@ impl Config {
         self.foldlevel = raw.foldlevel;
         self.reading_width = raw.reading_width.unwrap_or(0);
         if let Some(k) = raw.keybindings {
-            self.keybindings = k;
+            self.apply_keybindings(k);
+        }
+        // optional standalone keybindings.toml — overrides config.toml's map
+        let kb_path = self.config_dir.join("keybindings.toml");
+        if let Ok(text) = fs::read_to_string(&kb_path) {
+            if let Ok(raw_kb) = toml::from_str::<RawConfig>(&text) {
+                if let Some(k) = raw_kb.keybindings {
+                    self.apply_keybindings(k);
+                }
+            }
         }
         if let Some(v) = raw.pane_ratio {
             if v.len() == 3 {
@@ -277,6 +294,23 @@ fn expand_tilde(p: &str) -> PathBuf {
         }
     }
     PathBuf::from(p)
+}
+
+impl Config {
+    fn apply_keybindings(&mut self, k: std::collections::HashMap<String, KeySpec>) {
+        self.keybindings = k
+            .into_iter()
+            .map(|(a, spec)| (a, spec_to_keys(spec)))
+            .collect();
+    }
+}
+
+/// Flatten a KeySpec (single or list) into key strings.
+fn spec_to_keys(spec: KeySpec) -> Vec<String> {
+    match spec {
+        KeySpec::One(k) => vec![k],
+        KeySpec::Many(ks) => ks,
+    }
 }
 
 /// Parse the config file by extension; `None` when unreadable/absent.
