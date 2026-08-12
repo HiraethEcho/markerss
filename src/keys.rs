@@ -4,6 +4,7 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 
 use crate::clipboard::copy_to_clipboard;
+use crate::ui::hint_index;
 use crate::{App, InputMode, TreeRow};
 
 /// Keybinding actions — user-remappable single-key actions.
@@ -32,6 +33,7 @@ pub(crate) enum Action {
     JumpBottom,
     NextUnread,
     PrevUnread,
+    LinkJump,
 }
 
 impl Action {
@@ -61,6 +63,7 @@ impl Action {
             "jump_bottom" => Action::JumpBottom,
             "next_unread" => Action::NextUnread,
             "prev_unread" => Action::PrevUnread,
+            "link_jump" => Action::LinkJump,
             _ => return None,
         })
     }
@@ -185,6 +188,10 @@ impl App {
             },
             Action::NextUnread => self.mark_read_and_jump(1),
             Action::PrevUnread => self.mark_read_and_jump(-1),
+            Action::LinkJump if self.focus == 2 => {
+                self.link_mode = true;
+                self.status = "link jump: press a hint key (1-9, a-z) · esc/h/q to cancel".into();
+            }
             _ => {}
         }
     }
@@ -238,6 +245,28 @@ impl App {
                 }
             }
             self.clear_pending();
+            return;
+        }
+        // link-jump mode: a hint key opens the link; esc/h/q cancels
+        if self.link_mode {
+            match key {
+                KeyCode::Char(c) if hint_index(c).is_some() => {
+                    if let Some((_, url)) = self
+                        .link_hints
+                        .get(hint_index(c).unwrap())
+                        .cloned()
+                    {
+                        self.open_url(&url);
+                    } else {
+                        self.status = "no link for that hint".into();
+                    }
+                    self.link_mode = false;
+                }
+                KeyCode::Esc | KeyCode::Char('h') | KeyCode::Char('q') => {
+                    self.link_mode = false;
+                }
+                _ => {}
+            }
             return;
         }
         // user keybindings: remapped key → action (defaults still work);
@@ -346,6 +375,7 @@ impl App {
                 self.fullscreen = !self.fullscreen;
             }
             KeyCode::Char('f') if self.focus == 0 => self.execute_action(Action::Favourite),
+            KeyCode::Char('f') if self.focus == 2 => self.execute_action(Action::LinkJump),
             KeyCode::Char('?') => self.execute_action(Action::Help),
             // / — modal list search (live filter; enter keeps, esc restores)
             KeyCode::Char('/') if self.focus == 1 => self.execute_action(Action::Search),

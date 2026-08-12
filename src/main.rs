@@ -120,6 +120,8 @@ struct App {
     search_query: String,
     keymap: std::collections::HashMap<KeyCode, crate::keys::Action>,
     feed_errors: std::collections::HashMap<String, String>,
+    link_mode: bool,
+    link_hints: Vec<(String, String)>,
     input: Option<InputPrompt>,
     add_pending: Option<String>,
     add_pending_title: Option<String>,
@@ -189,6 +191,8 @@ impl App {
             search_query: String::new(),
             keymap,
             feed_errors: std::collections::HashMap::new(),
+            link_mode: false,
+            link_hints: Vec::new(),
             input: None,
             add_pending: None,
             add_pending_title: None,
@@ -974,14 +978,19 @@ impl App {
             self.status = "no url".into();
             return;
         }
+        self.open_url(&item.url);
+    }
+
+    /// Open an arbitrary URL in the configured browser (fallback xdg-open).
+    fn open_url(&mut self, url: &str) {
         let cmd = self.cfg.browser.clone().unwrap_or_else(|| "xdg-open".to_string());
         let _ = std::process::Command::new(&cmd)
-            .arg(&item.url)
+            .arg(url)
             .spawn()
             .map_err(|e| {
                 self.status = format!("{cmd} failed: {e}");
             });
-        self.status = format!("opened {}", item.url);
+        self.status = format!("opened {url}");
     }
 
     /// Start the export flow: prompt with the default filename as placeholder.

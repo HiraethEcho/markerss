@@ -309,6 +309,63 @@ fn article_header<'a>(app: &App, url: &str, item: &'a Item, feed_name: &'a str) 
     ])
 }
 
+/// Link-jump render: every link gets a `[hint]` prefix; returns the
+/// (alt, url) table in the same order as the hints (max 35).
+fn render_article_text_hints(app: &App, item: &Item) -> (Text<'static>, Vec<(String, String)>) {
+    let md = app.article_markdown_display(item);
+    if md.trim().is_empty() {
+        return (Text::from(""), Vec::new());
+    }
+    let link_style = Style::default()
+        .fg(app.theme.accent)
+        .add_modifier(Modifier::UNDERLINED);
+    let hint_style = Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD);
+    let img_style = Style::default().fg(app.theme.dim);
+    let state = std::sync::Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));
+    let s = state.clone();
+    let renderer = the_other_tui_markdown::RendererBuilder::new()
+        .with_theme(app.theme.md.clone())
+        .with_link(move |alt, url| {
+            let mut v = s.lock().unwrap();
+            let idx = v.len();
+            if idx < 35 {
+                let hint = hint_char(idx);
+                v.push((alt.to_string(), url.to_string()));
+                vec![
+                    Span::styled(format!("[{hint}] "), hint_style),
+                    Span::styled(alt.to_string(), link_style),
+                ]
+            } else {
+                vec![Span::styled(alt.to_string(), link_style)]
+            }
+        })
+        .with_image(move |_alt, _url| {
+            vec![Span::styled("[img]", img_style)]
+        })
+        .build();
+    let text = the_other_tui_markdown::into_text_with_renderer(&md, &renderer);
+    let hints = std::sync::Arc::try_unwrap(state).ok().unwrap().into_inner().unwrap();
+    (text, hints)
+}
+
+/// 0 → '1', …, 8 → '9', 9 → 'a', … (hint keys for link jump).
+fn hint_char(idx: usize) -> char {
+    if idx < 9 {
+        (b'1' + idx as u8) as char
+    } else {
+        (b'a' + (idx - 9) as u8) as char
+    }
+}
+
+/// Map a pressed hint key back to its index.
+pub(crate) fn hint_index(c: char) -> Option<usize> {
+    match c {
+        '1'..='9' => Some((c as u8 - b'1') as usize),
+        'a'..='z' => Some((c as u8 - b'a') as usize + 9),
+        _ => None,
+    }
+}
+
 fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     let Some((url, item)) = app.current_item() else {
         frame.render_widget(
@@ -363,7 +420,12 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     // Body: feed/fetched HTML → markdown → styled ratatui Text
     // (eilmeldung-style pipeline: html2md + the_other_tui_markdown).
     // Links render as underlined alt text (no URL); images as [img].
-    let body_text = if content_ready {
+    let body_text = if app.link_mode && content_ready {
+        // link-jump: render with hints (no cache — fresh hints each time)
+        let (t, hints) = render_article_text_hints(app, &item);
+        app.link_hints = hints;
+        t
+    } else if content_ready {
         // render once per guid; reuse until the item's content changes
         if !matches!(&app.article_render, Some((g, _)) if g == &item.guid) {
             let t = render_article_text(app, &item);
@@ -491,4 +553,23 @@ fn draw_input(frame: &mut Frame, area: Rect, prompt: &InputPrompt) {
 fn pane_block<'a>(title: &'a str, focused: bool) -> Block<'a> {
     let color = if focused { Color::Yellow } else { Color::DarkGray };
     Block::bordered().title(title).border_style(Style::default().fg(color))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hint_roundtrip() {
+        for idx in 0..35 {
+            let c = hint_char(idx);
+            assert_eq!(hint_index(c), Some(idx), "idx {idx} char {c}");
+        }
+        assert_eq!(hint_char(0), '1');
+        assert_eq!(hint_char(8), '9');
+        assert_eq!(hint_char(9), 'a');
+        assert_eq!(hint_char(34), 'z');
+        assert_eq!(hint_index('0'), None);
+        assert_eq!(hint_index('A'), None);
+    }
 }
