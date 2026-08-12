@@ -244,8 +244,7 @@ impl Db {
 
     pub fn set_flag(&mut self, feed_url: &str, guid: &str, flag: &str, on: bool) -> rusqlite::Result<()> {
         let col = match flag {
-            "read_later" => "read_later",
-            "saved" => "saved",
+            "read_later" | "saved" => flag,
             _ => return Ok(()),
         };
         let sql = format!("UPDATE items SET {col} = ?3 WHERE feed_url = ?1 AND guid = ?2");
