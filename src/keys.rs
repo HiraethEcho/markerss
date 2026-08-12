@@ -267,9 +267,9 @@ impl App {
         }
         match key {
             // left: h / q / esc — article→list→nav→parent in tree
-            KeyCode::Char('h') | KeyCode::Char('q') | KeyCode::Esc => self.go_left(),
+            KeyCode::Char('h') | KeyCode::Char('q') | KeyCode::Esc | KeyCode::Left => self.go_left(),
             // right: l / enter — expand tree→list→article→fetch full
-            KeyCode::Char('l') | KeyCode::Enter => self.go_right(),
+            KeyCode::Char('l') | KeyCode::Enter | KeyCode::Right => self.go_right(),
             KeyCode::Char('Q') => self.execute_action(Action::Quit),
             // y-prefix: yy item url, yn item title, yf feed url
             KeyCode::Char('y') => {
