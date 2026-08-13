@@ -7,11 +7,11 @@
 - [x] change: scaffold-parse (cpp) — done, committed 3d8be0c, frozen
 
 ## Pickup commands
-- rust Phase 3 → approve `lightspec/changes/state-unread-counts/proposal.md`, then /pickup in ../markerss-rust
+- rust Phase 3 → approve `lightspec/changes/state-unread-counts/proposal.md`, then /pickup on `rust` branch
 - scaffold-parse changes → `lightspec archive scaffold-parse` (each branch) when ready
 
 ## Notes
-- Design lives on main (../markerss) — DESIGN.md is authority; branches rebase on main
+- Design lives on main — DESIGN.md is authority; branches rebase on main
 - rust = chosen language (best code quality); go/cpp frozen, kept for reference
 - Phase 2 wording fix: `~` = custom display name (NOT hidden) — corrected in DESIGN.md
 - rust skeleton quirk: panics on non-tty (`ratatui::init`) — fix when doing error handling (Phase 10 polish)

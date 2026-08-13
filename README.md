@@ -6,10 +6,10 @@ TUI RSS reader — browse feeds in the terminal, store blog posts as markdown on
 
 `main` is design-only (sdd-lite): [SPEC.md](SPEC.md) (intent), [PLAN.md](PLAN.md) (roadmap), [DESIGN.md](DESIGN.md) (TUI design). Five parallel specs — **MVP**, **Config**, **Tags & Favorites**, **Article Polish & Enhancement**, **Advanced** — each a `##` section in all three docs.
 
-Implementation lives in parallel worktrees, one per language (full sdd):
-- `rust` → `../markerss-rust` (Rust + ratatui + feed-rs)
-- `go` → `../markerss-go` (Go + bubbletea + gofeed)
-- `cpp` → `../markerss-cpp` (C++ + FTXUI + libcurl)
+Implementation lives on parallel branches, one per language (full sdd):
+- `rust` (Rust + ratatui + feed-rs)
+- `go` (Go + bubbletea + gofeed)
+- `cpp` (C++ + FTXUI + libcurl)
 
 Each branch rebases on main and implements all five specs, in order MVP → Config → Tags & Favorites → Article Polish → Advanced.
 
@@ -32,13 +32,13 @@ Each branch rebases on main and implements all five specs, in order MVP → Conf
 
 ```sh
 # rust
-cd ../markerss-rust && cargo build --release && cargo run
+git checkout rust && cargo build --release && cargo run
 
 # go
-cd ../markerss-go && go build && ./markerss
+git checkout go && go build && ./markerss
 
 # cpp
-cd ../markerss-cpp && make && ./build/markerss
+git checkout cpp && make && ./build/markerss
 ```
 
 ## Status

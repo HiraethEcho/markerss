@@ -10,10 +10,10 @@ This repository's `main` branch is DESIGN-ONLY: markdown recording intent, roadm
   - `## Tags & Favorites` — tags strip in lower nav + favorites as special category
   - `## Article Polish` — comfortable long-form article rendering
   - `## Advanced` — OPML mapping (nested categories, tags)
-- Implementation in parallel sibling worktrees, one branch each (full sdd, own AGENTS.md + lightspec/):
-  - `rust` → `../markerss-rust` (Rust + ratatui + feed-rs)
-  - `go` → `../markerss-go` (Go + bubbletea + gofeed)
-  - `cpp` → `../markerss-cpp` (C++ + FTXUI + libcurl, newsboat source as reference)
+- Implementation on parallel branches, one per language (full sdd, own AGENTS.md + lightspec/):
+  - `rust` (Rust + ratatui + feed-rs)
+  - `go` (Go + bubbletea + gofeed)
+  - `cpp` (C++ + FTXUI + libcurl, newsboat source as reference)
 
 ## Role of Files in main
 
