@@ -18,7 +18,7 @@ pub fn http(timeout_secs: u64) -> reqwest::blocking::Client {
 }
 
 /// Refresh one feed; returns items sorted newest-first.
-pub fn refresh_feed(url: &str, timeout_secs: u64) -> Result<Vec<Item>, String> {
+pub fn refresh_feed(url: &str, timeout_secs: u64) -> Result<(Option<String>, Vec<Item>), String> {
     let resp = http(timeout_secs)
         .get(url)
         .send()
@@ -30,6 +30,7 @@ pub fn refresh_feed(url: &str, timeout_secs: u64) -> Result<Vec<Item>, String> {
         .bytes()
         .map_err(|e| format!("read {url}: {e}"))?;
     let feed = feed_rs::parser::parse(&body[..]).map_err(|e| format!("parse {url}: {e}"))?;
+    let feed_title = feed.title.map(|t| t.content).filter(|t| !t.is_empty());
 
     let mut items: Vec<Item> = feed
         .entries
@@ -71,7 +72,7 @@ pub fn refresh_feed(url: &str, timeout_secs: u64) -> Result<Vec<Item>, String> {
         .collect();
     // Newest first; items without date sink to the end.
     items.sort_by(|a, b| b.date.cmp(&a.date));
-    Ok(items)
+    Ok((feed_title, items))
 }
 
 /// Fetch full article, extract main content (Mozilla Readability via

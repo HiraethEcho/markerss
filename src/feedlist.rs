@@ -17,6 +17,8 @@ pub struct Feed {
     pub title: Option<String>,
     /// Title came with `~` prefix → custom display name, do not override from feed.
     pub custom_name: bool,
+    /// Title fetched from the feed XML (session; refreshed on each fetch).
+    pub feed_title: Option<String>,
     /// Categories (`#`-less words); first = tree placement.
     pub tags: Vec<String>,
     /// Feed tags (`#`-prefixed words).
@@ -29,7 +31,7 @@ impl Feed {
     pub fn display_name(&self) -> &str {
         match &self.title {
             Some(t) => t,
-            None => &self.url,
+            None => self.feed_title.as_deref().unwrap_or(&self.url),
         }
     }
 
@@ -261,6 +263,7 @@ pub fn parse_line(line: &str) -> Option<Feed> {
         url: url.to_string(),
         title,
         custom_name,
+        feed_title: None,
         tags: categories,
         feed_tags,
         favourite,
@@ -413,5 +416,38 @@ mod tests {
             file.categories(),
             vec!["systems", "systems/lang", "dev/go", "blog"]
         );
+    }
+}
+
+#[cfg(test)]
+mod feed_title_tests {
+    use super::*;
+
+    #[test]
+    fn display_name_prefers_feed_title_over_url() {
+        let f = Feed {
+            url: "https://x.com/f".into(),
+            title: None,
+            custom_name: false,
+            feed_title: Some("X Blog".into()),
+            tags: vec![],
+            feed_tags: vec![],
+            favourite: false,
+        };
+        assert_eq!(f.display_name(), "X Blog");
+    }
+
+    #[test]
+    fn custom_title_beats_feed_title() {
+        let f = Feed {
+            url: "https://x.com/f".into(),
+            title: Some("My Name".into()),
+            custom_name: true,
+            feed_title: Some("X Blog".into()),
+            tags: vec![],
+            feed_tags: vec![],
+            favourite: false,
+        };
+        assert_eq!(f.display_name(), "My Name");
     }
 }
