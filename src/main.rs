@@ -37,7 +37,7 @@ use crate::feedlist::{Feed, File};
 enum Msg {
     FeedRefreshed {
         url: String,
-        result: Result<Vec<Item>, String>,
+        result: Result<(Option<String>, Vec<Item>), String>,
         full: bool,
     },
     ArticleFetched { url: String, guid: String, result: Result<String, String> },
@@ -622,6 +622,7 @@ impl App {
                     url: url.clone(),
                     title,
                     custom_name: false,
+                    feed_title: None,
                     tags,
                     feed_tags,
                     favourite: false,
@@ -826,13 +827,20 @@ impl App {
     fn handle_feed_refreshed(
         &mut self,
         url: String,
-        result: Result<Vec<Item>, String>,
+        result: Result<(Option<String>, Vec<Item>), String>,
         full: bool,
     ) {
         self.pending_refreshes = self.pending_refreshes.saturating_sub(1);
         match result {
-            Ok(mut items) => {
+            Ok((feed_title, mut items)) => {
                 self.feed_errors.remove(&url);
+                // show the real feed title in nav when no custom name
+                if let Some(ft) = feed_title {
+                    if let Some(f) = self.feeds.feeds.iter_mut().find(|f| f.url == url) {
+                        f.feed_title = Some(ft);
+                    }
+                    self.rebuild_tree();
+                }
                 if let Some(cap) = self.cfg.max_items_per_feed {
                     items.truncate(cap);
                 }
