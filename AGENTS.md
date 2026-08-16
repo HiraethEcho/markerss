@@ -53,3 +53,7 @@ SDD Workflow (default tier)
 - Coding → `building` (thin slices, ponytail); testing → `test-driven-development`
 - Task self-review → `reviewing`; security-sensitive → `security-and-hardening`
 - Design updates land on `main` → `git rebase main` here before implementing
+
+## Collaboration Rules
+
+- **Never `git push` without the user's explicit approval** — local commits and rebases are fine; pushing to any remote requires a "push it" / "push" go-ahead first.

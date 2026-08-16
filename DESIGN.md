@@ -12,8 +12,9 @@ Three panes:
 ┌─ Nav ────────────────┬─ List ───────────────┬─ Article ───────────┐
 │ Unread (5)           │ • item title [L]     │ header:             │
 │ Read Later (2)       │ • item title [S]     │   title             │
-│ ▾ Favourite (2)      │   read item          │   feed · date · url │
-│   feed1              │ ...                  │   summary           │
+│ Favourite (3)        │   read item          │   feed · date · url │
+│ ...                  │                      │─────────────────────│
+│                      │                      │ body: summary (+content)│
 │ ▾ Categories         │                      │─────────────────────│
 │   ▸ cat1             │                      │ content:            │
 │   ▾ cat2             │                      │   RSS body / blank  │
@@ -39,7 +40,7 @@ Top entries and their fold behavior:
 | Unread | no | — (list of unread items) |
 | Read Later | no | — (items flagged read_later) |
 | Saved | no | — (items flagged saved) |
-| Favourite | yes | favourited feeds (flat) |
+| Favourite | no (aggregate) | items of all favourited feeds (like Read Later/Saved) |
 | Categories | yes | category tree → feeds |
 | Tags | yes | per-tag entries, each foldable → feeds carrying it |
 | Feeds | yes | all feeds (flat) |
@@ -52,7 +53,8 @@ Tree behavior:
 - **Feed health**: a feed whose last fetch failed shows a `!` marker on its nav row (cleared on next successful fetch).
 - **Left (`h`/`q`/`esc`) cascade**: expanded header → fold it; folded header → fold its parent; a top-level folded entry stays (never jumps to Unread); a feed row folds its containing container (category → tag → section).
 - **Right (`l`/`enter`)**: folded entry → expand and **jump the cursor to its first child**; expanded/leaf entry → descend to the list pane.
-- Article pane split: header (meta + summary) + content. **List mode (focus in list) shows summary only**; article mode shows the RSS body (blank when the feed has none).
+- Article pane split: **3-line header (title / feed·date·read / url)** + body, no separator.
+- **No summary truncation**: list preview shows the full summary in the body; article mode shows **summary + feed content in order** (no duplication — summary-only feeds show the summary once).
 - Pane widths configurable via `pane_ratio` (default ≈ 0.15 / 0.15 / 0.70).
 
 ### Feed Source
@@ -85,7 +87,7 @@ Directional movement: `h`/`q`/`esc` = LEFT, `l`/`enter` = RIGHT (+ arrow keys `�
 - List `n`/`p` — mark current read, jump to next/prev unread (no reorder).
 - **List semantics**: the list is a snapshot taken at startup / manual refresh (`R`) / scope change. Auto fetch (`r`/startup/interval) only **appends new unread items** — read items stay in place, never reordered, until manual refresh or restart.
 - **Read-later lifecycle**: marking read-later also marks the item unread; opening/reading an item clears its read-later flag.
-- Article pane: list mode shows summary only; article mode shows the RSS body (blank if none); `n/p` next/prev item; `j/k` scroll; ctrl+u/ctrl+d half-page (list too).
+- Article pane: preview (list focus) shows the full summary; article mode shows summary + content (blank only when a feed has neither — `enter` fetches); `n/p` parent navigation (article→list cursor, list→nav cursor); `j/k` scroll; ctrl+u/ctrl+d half-page.
 
 ### Storage
 
@@ -108,10 +110,11 @@ Directional movement: `h`/`q`/`esc` = LEFT, `l`/`enter` = RIGHT (+ arrow keys `�
 - Rendering strategy is **per-language** — each branch chooses its own HTML → styled-text pipeline.
 - Behavioral contract (all branches):
   - Headings bold, lists/code blocks rendered.
-  - Links as **underlined alt text (URL not shown)**.
+  - Links as **underlined alt text, URL never shown** (urls stripped at display; export keeps them).
   - Images shown as `[img]` placeholder.
   - `<sub>`/`<sup>` → `~x~`/`^x^` markers (rendered as subscript/superscript).
-- Article pane modes: **list mode** → body hidden (summary only); **article mode** → RSS body rendered (blank when the feed has none); fetched full content replaces it.
+- Body markdown = summary + feed content in order (each rendered once; no duplication).
+- Nav feed rows display the **feed's own title** (fetched from the feed XML, persisted to the urls file) — priority: custom name > feed title > url.
 - Export format = the same markdown, written to file on `e`.
 - Help = floating opaque window (default colors), scrollable with `j`/`k`/arrows.
 
