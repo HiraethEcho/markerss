@@ -198,7 +198,9 @@ impl App {
                 match self.tree_rows.get(self.tree_sel) {
                     Some(TreeRow::Category(_)) => self.start_input(InputMode::RenameCategory),
                     Some(TreeRow::Tag(_)) => self.start_input(InputMode::EditTag),
-                    Some(TreeRow::Feed(url, _, _)) => {
+                    Some(TreeRow::Feed(url, _, _))
+                    | Some(TreeRow::FavouriteFeed(url, _))
+                    | Some(TreeRow::UncategorizedFeed(url, _)) => {
                         self.pending = Some(crate::PendingInput::EditTags { url: url.clone() });
                         self.start_input(InputMode::EditFeedTitle);
                     }
@@ -206,7 +208,13 @@ impl App {
                 }
             }
             Action::EditTags if self.focus == 0 => {
-                if let Some(TreeRow::Feed(url, _, _)) = self.tree_rows.get(self.tree_sel).cloned() {
+                let Some(url) = self.tree_rows.get(self.tree_sel).and_then(|r| match r {
+                    TreeRow::Feed(u, _, _) | TreeRow::FavouriteFeed(u, _) | TreeRow::UncategorizedFeed(u, _) => Some(u.clone()),
+                    _ => None,
+                }) else {
+                    return;
+                };
+                {
                     self.pending = Some(crate::PendingInput::EditTags { url });
                     self.start_input(InputMode::EditTags);
                 }
@@ -483,10 +491,7 @@ impl App {
                 }
             }
             TreeRow::Favourite => {
-                if self.fav_expanded {
-                    self.fav_expanded = false;
-                    self.rebuild_tree();
-                }
+                // aggregate view has no fold — second left goes to nav
             }
             TreeRow::Uncategorized => {
                 if self.uncat_expanded {
@@ -559,7 +564,6 @@ impl App {
                             return;
                         }
                         TreeRow::Favourite => {
-                            self.fav_expanded = false;
                             self.rebuild_tree();
                             self.tree_sel = j;
                             return;
@@ -599,10 +603,9 @@ impl App {
                 self.rebuild_tree();
                 self.step_into_expanded();
             }
-            Some(TreeRow::Favourite) if !self.fav_expanded => {
-                self.fav_expanded = true;
-                self.rebuild_tree();
-                self.step_into_expanded();
+            Some(TreeRow::Favourite) => {
+                // aggregate view: descend into the list of favourited items
+                self.select_scope(&TreeRow::Favourite.clone());
             }
             Some(TreeRow::Uncategorized) if !self.uncat_expanded => {
                 self.uncat_expanded = true;

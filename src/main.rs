@@ -84,6 +84,7 @@ enum Scope {
     AllUnread,
     ReadLater,
     Saved,
+    Favourite,
     Category(String),
     Feed(String),
     Tag(String),
@@ -98,7 +99,6 @@ struct App {
     // nav tree
     collapsed: std::collections::HashSet<String>,
     preset_idx: usize,
-    fav_expanded: bool,
     uncat_expanded: bool,
     tree_sel: usize,
     tree_rows: Vec<TreeRow>,
@@ -167,7 +167,6 @@ impl App {
             db,
             collapsed: Default::default(),
             preset_idx: 0,
-            fav_expanded: true,
             uncat_expanded: true,
             tree_sel: 0,
             tree_rows: Vec::new(),
@@ -243,6 +242,19 @@ impl App {
                 rows.push(TreeRow::Section(section.clone()));
             }
             let section_collapsed = self.collapsed.contains(&section);
+            // No Category keeps its own fold state — a collapsed Categories
+            // section must not hide it
+            if section == "Categories" && !self.feeds.uncategorized().is_empty() {
+                rows.push(TreeRow::Uncategorized);
+                if self.uncat_expanded {
+                    for f in self.feeds.uncategorized() {
+                        rows.push(TreeRow::UncategorizedFeed(
+                            f.url.clone(),
+                            f.display_name().to_string(),
+                        ));
+                    }
+                }
+            }
             if section_collapsed {
                 continue;
             }
@@ -252,13 +264,11 @@ impl App {
                 "Saved" => rows.push(TreeRow::Saved),
                 "Favourite" => {
                     rows.push(TreeRow::Favourite);
-                    if self.fav_expanded {
-                        for f in self.feeds.feeds.iter().filter(|f| f.favourite) {
-                            rows.push(TreeRow::FavouriteFeed(
-                                f.url.clone(),
-                                f.display_name().to_string(),
-                            ));
-                        }
+                    for f in self.feeds.feeds.iter().filter(|f| f.favourite) {
+                        rows.push(TreeRow::FavouriteFeed(
+                            f.url.clone(),
+                            f.display_name().to_string(),
+                        ));
                     }
                 }
                 "Categories" => {
@@ -283,19 +293,6 @@ impl App {
                                     f.url.clone(),
                                     f.display_name().to_string(),
                                     (depth * 2 + 2) as u8,
-                                ));
-                            }
-                        }
-                    }
-                    // uncategorized feeds as their own foldable top node
-                    // (hidden when every feed has a category)
-                    if !self.feeds.uncategorized().is_empty() {
-                        rows.push(TreeRow::Uncategorized);
-                        if self.uncat_expanded {
-                            for f in self.feeds.uncategorized() {
-                                rows.push(TreeRow::UncategorizedFeed(
-                                    f.url.clone(),
-                                    f.display_name().to_string(),
                                 ));
                             }
                         }
@@ -362,7 +359,8 @@ impl App {
             TreeRow::FavouriteFeed(url, _) => Scope::Feed(url.clone()),
             TreeRow::UncategorizedFeed(url, _) => Scope::Feed(url.clone()),
             TreeRow::Tag(t) => Scope::Tag(t.clone()),
-            TreeRow::Favourite | TreeRow::Uncategorized => Scope::AllUnread,
+            TreeRow::Favourite => Scope::Favourite,
+            TreeRow::Uncategorized => Scope::AllUnread,
         };
         self.list_sel = 0;
         self.clear_search();
@@ -386,7 +384,8 @@ impl App {
                 TreeRow::FavouriteFeed(url, _) => Scope::Feed(url),
                 TreeRow::UncategorizedFeed(url, _) => Scope::Feed(url),
                 TreeRow::Tag(t) => Scope::Tag(t),
-                TreeRow::Favourite | TreeRow::Uncategorized => Scope::AllUnread,
+                TreeRow::Favourite => Scope::Favourite,
+            TreeRow::Uncategorized => Scope::AllUnread,
             };
             self.list_sel = 0;
             self.clear_search();
@@ -413,6 +412,15 @@ impl App {
             }
             Scope::ReadLater => items = self.db.items_with_flag("read_later").unwrap_or_default(),
             Scope::Saved => items = self.db.items_with_flag("saved").unwrap_or_default(),
+            Scope::Favourite => {
+                for f in self.feeds.feeds.iter().filter(|f| f.favourite) {
+                    if let Ok(list) = self.db.items_for_feed(&f.url) {
+                        for i in list {
+                            items.push((f.url.clone(), i));
+                        }
+                    }
+                }
+            }
             Scope::Category(cat) => {
                 for f in self.feeds.by_category(cat) {
                     if let Ok(list) = self.db.items_for_feed(&f.url) {
@@ -486,6 +494,9 @@ impl App {
     fn article_markdown_display(&self, item: &Item) -> String {
         if !item.content.trim().is_empty() {
             fetch::html_to_markdown(&item.content)
+        } else if !item.summary.trim().is_empty() {
+            // feeds with summary-only content (no <content> in the XML)
+            fetch::html_to_markdown(&item.summary)
         } else {
             String::new()
         }
@@ -779,7 +790,7 @@ impl App {
     /// Feed urls belonging to the current scope (for partial refresh).
     fn scope_feeds(&self) -> Vec<String> {
         match &self.scope {
-            Scope::AllUnread | Scope::ReadLater | Scope::Saved => {
+            Scope::AllUnread | Scope::ReadLater | Scope::Saved | Scope::Favourite => {
                 self.feeds.feeds.iter().map(|f| f.url.clone()).collect()
             }
             Scope::Category(c) => self
@@ -834,11 +845,16 @@ impl App {
         match result {
             Ok((feed_title, mut items)) => {
                 self.feed_errors.remove(&url);
-                // show the real feed title in nav when no custom name
+                // show the real feed title in nav when no custom name, and
+                // persist it to the urls file (quoted title)
                 if let Some(ft) = feed_title {
                     if let Some(f) = self.feeds.feeds.iter_mut().find(|f| f.url == url) {
+                        if f.title.is_none() {
+                            f.title = Some(ft.clone());
+                        }
                         f.feed_title = Some(ft);
                     }
+                    self.save_urls();
                     self.rebuild_tree();
                 }
                 if let Some(cap) = self.cfg.max_items_per_feed {
@@ -987,6 +1003,13 @@ impl App {
         }
         let urls: Vec<String> = match &self.scope {
             Scope::AllUnread => self.feeds.feeds.iter().map(|f| f.url.clone()).collect(),
+            Scope::Favourite => self
+                .feeds
+                .feeds
+                .iter()
+                .filter(|f| f.favourite)
+                .map(|f| f.url.clone())
+                .collect(),
             Scope::Category(cat) => self
                 .feeds
                 .by_category(cat)
