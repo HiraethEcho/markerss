@@ -277,13 +277,12 @@ fn strip_link_urls(md: &str) -> String {
     .to_string()
 }
 
-fn render_article_text(app: &App, item: &Item) -> Text<'static> {
-    let md = app.article_markdown_display(item);
+/// Render markdown → styled Text (link URLs stripped for display).
+fn render_markdown(app: &App, md: &str) -> Text<'static> {
     if md.trim().is_empty() {
-        return Text::from(""); // caller falls back to the fetch hint
+        return Text::from("");
     }
-    // display: link text only, no URL in the article pane
-    let md = strip_link_urls(&md);
+    let md = strip_link_urls(md);
     let options = tui_markdown::Options::new(app.theme.styles.clone())
         .image_fallback(tui_markdown::ImageFallback::AltTextAndUrl);
     let text = tui_markdown::from_str_with_options(&md, &options);
@@ -321,10 +320,6 @@ fn article_header<'a>(app: &App, url: &str, item: &'a Item, feed_name: &'a str) 
     } else {
         ""
     };
-    // summary: plain text (HTML tags stripped), truncated to 2 lines —
-    // the rest flows into the body
-    let plain = crate::util::strip_html_tags(&item.summary);
-    let summary_line = Line::from(Span::styled(plain, Style::default()));
     Text::from(vec![
         Line::from(Span::styled(item.display_title().to_string(), title_style)),
         Line::from(Span::styled(
@@ -332,8 +327,6 @@ fn article_header<'a>(app: &App, url: &str, item: &'a Item, feed_name: &'a str) 
             meta_style,
         )),
         Line::from(Span::styled(item.url.clone(), dim_style)),
-        Line::from(""),
-        summary_line,
     ])
 }
 
@@ -355,10 +348,6 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
         .unwrap_or_default();
 
     let in_article = app.focus == 2;
-    // list mode: summary only; article mode: feed content (or summary when
-    // the feed has no <content> body), then fetch hint
-    let content_ready = in_article
-        && (!item.content.trim().is_empty() || !item.summary.trim().is_empty());
 
     // Fixed header (title/meta/summary), content scrolls below a separator.
     let block = pane_block("Article", app.focus == 2);
@@ -366,20 +355,10 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     // fixed header: title/meta/url + 2 summary lines; the rest of a long
     // summary flows into the body area
     let [head, body] = Layout::vertical([
-        Constraint::Length(5),
+        Constraint::Length(3),
         Constraint::Min(0),
     ])
     .areas(inner);
-    let summary_plain = crate::util::strip_html_tags(&item.summary);
-    let summary_w = (inner.width.saturating_sub(2)).max(1) as usize;
-    // chars that fit in 2 header lines (approximate width count)
-    let two_lines = 2 * summary_w;
-    let summary_rest: String = summary_plain
-        .chars()
-        .skip(two_lines)
-        .collect::<String>()
-        .trim()
-        .to_string();
 
     let header_text = article_header(app, &url, &item, feed_name.as_str());
     frame.render_widget(Paragraph::new(header_text).wrap(Wrap { trim: true }), head);
@@ -387,41 +366,40 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     // Body: feed/fetched HTML → markdown → styled ratatui Text
     // (h2md → tui-markdown pipeline).
     // Links render as underlined alt text (no URL); images as [img].
-    let body_text = if content_ready {
-        // render once per (feed_url, guid); reuse until the item's content changes
-        let key = (url.clone(), item.guid.clone());
-        let summary_only = item.content.trim().is_empty();
+    // body markdown: preview = full summary; article = summary + content
+    // (both, in order, no truncation, no duplication)
+    let summary_md = if !item.summary.trim().is_empty() {
+        Some(crate::fetch::html_to_markdown(&item.summary))
+    } else {
+        None
+    };
+    let content_md = if !item.content.trim().is_empty() {
+        Some(crate::fetch::html_to_markdown(&item.content))
+    } else {
+        None
+    };
+    let md = if in_article {
+        match (summary_md, content_md) {
+            (Some(s), Some(c)) => format!("{s}\n\n{c}"),
+            (Some(s), None) => s,
+            (None, Some(c)) => c,
+            (None, None) => String::new(),
+        }
+    } else {
+        summary_md.unwrap_or_default()
+    };
+    let body_text = if !md.trim().is_empty() {
+        // cache per (feed_url, guid, mode)
+        let key = (url.clone(), item.guid.clone(), in_article);
         if !matches!(&app.article_render, Some((k, _)) if k == &key) {
-            let t = if summary_only {
-                // summary-only feed: header already shows the first 2 lines,
-                // body carries only the remainder (no duplication)
-                if summary_rest.is_empty() {
-                    Text::from("")
-                } else {
-                    Text::from(summary_rest.clone())
-                }
-            } else {
-                let mut t = render_article_text(app, &item);
-                if !summary_rest.is_empty() {
-                    // long summary: header shows the first 2 lines, the rest leads the body
-                    let mut lines = vec![Line::from(summary_rest.clone())];
-                    lines.extend(t.lines);
-                    t = Text::from(lines);
-                }
-                t
-            };
+            let t = render_markdown(app, &md);
             app.article_render = Some((key, t.clone()));
         }
         app.article_render.as_ref().map(|(_, t)| t.clone()).unwrap_or_default()
     } else if app.fetching {
         Text::from("fetching…")
-    } else if !summary_rest.is_empty() {
-        // list preview: a long summary already overflows the header — show
-        // the remainder in the body area without entering the article
-        Text::from(summary_rest.clone())
     } else if in_article {
-        // in the article pane but the feed has no content — blank until fetched
-        Text::from("")
+        Text::from("") // feed has neither summary nor content — enter fetches
     } else {
         Text::from("l/enter to read")
     };

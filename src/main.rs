@@ -112,7 +112,7 @@ struct App {
     article_scroll: u16,
     fetching: bool,
     // rendered article body, keyed by item guid (avoid per-frame conversion)
-    article_render: Option<((String, String), ratatui::text::Text<'static>)>,
+    article_render: Option<((String, String, bool), ratatui::text::Text<'static>)>,
 
     focus: usize, // 0 nav, 1 list, 2 article
     fullscreen: bool,
@@ -491,17 +491,6 @@ impl App {
     }
 
     /// Display body markdown: content only (summary lives in the header).
-    fn article_markdown_display(&self, item: &Item) -> String {
-        if !item.content.trim().is_empty() {
-            fetch::html_to_markdown(&item.content)
-        } else if !item.summary.trim().is_empty() {
-            // feeds with summary-only content (no <content> in the XML)
-            fetch::html_to_markdown(&item.summary)
-        } else {
-            String::new()
-        }
-    }
-
     /// Export body markdown: content, falling back to summary.
     fn article_markdown_export(&self, item: &Item) -> String {
         if !item.content.trim().is_empty() {
