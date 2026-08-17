@@ -979,9 +979,13 @@ impl App {
 
     // ── actions ───────────────────────────────────────────────────────────
 
-    fn mark_all_read(&mut self) {
+    fn mark_all_read(&mut self, full: bool) {
         // A = mark every item in every feed read
-        let urls: Vec<String> = self.feeds.feeds.iter().map(|f| f.url.clone()).collect();
+        let urls: Vec<String> = if full {
+            self.feeds.feeds.iter().map(|f| f.url.clone()).collect()
+        } else {
+            self.scope_feeds()
+        };
         for u in urls {
             self.db.mark_all_read(&u).ok();
         }

@@ -27,6 +27,7 @@ pub const DEFAULT_KEYS: &[(&str, &[&str])] = &[
     ("refresh_all", &["R"]),
     ("toggle_read", &["a"]),
     ("toggle_read_next", &["<space>"]),
+    ("mark_read", &["a"]),
     ("mark_all_read", &["A"]),
     ("export", &["e"]),
     ("browser", &["o"]),
