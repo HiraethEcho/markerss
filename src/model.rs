@@ -12,6 +12,8 @@ pub struct Item {
     pub content: String,
     /// ISO-8601 published date; empty if unknown.
     pub date: String,
+    /// Author(s) from the feed, comma-joined; empty if unknown.
+    pub author: String,
     /// Read-later flag (item-level).
     pub read_later: bool,
     /// Saved flag (item-level, exempt from TTL).

@@ -98,6 +98,7 @@ struct App {
 
     // nav tree
     collapsed: std::collections::HashSet<String>,
+    fav_expanded: bool,
     preset_idx: usize,
     uncat_expanded: bool,
     tree_sel: usize,
@@ -156,7 +157,7 @@ impl App {
         let feeds = File::load_or_default(&cfg.urls_path);
         let db = Db::open(&cfg.db_path).expect("open sqlite db");
         let (tx, rx) = mpsc::channel();
-        let theme = ThemeColors::load(cfg.theme_path.as_ref());
+        let theme = ThemeColors::load(cfg.theme_path.as_ref(), cfg.background);
         let sort_stack: Vec<(String, bool)> =
             cfg.sort.iter().map(|s| (s.clone(), false)).collect();
         let keymap = crate::keys::build_keymap(&cfg.keybindings);
@@ -166,6 +167,7 @@ impl App {
             feeds,
             db,
             collapsed: Default::default(),
+            fav_expanded: true,
             preset_idx: 0,
             uncat_expanded: true,
             tree_sel: 0,
@@ -198,22 +200,8 @@ impl App {
             tx,
         };
         app.rebuild_tree();
-        app.apply_default_view();
         app.rebuild_list();
         app
-    }
-
-    fn apply_default_view(&mut self) {
-        let Some(dv) = &self.cfg.default_view else { return };
-        if let Some(url) = dv.strip_prefix("Feed:") {
-            if self.feeds.feeds.iter().any(|f| f.url == url) {
-                self.scope = Scope::Feed(url.to_string());
-            }
-        } else if let Some(cat) = dv.strip_prefix("Category:") {
-            if self.feeds.categories().iter().any(|c| c == cat) {
-                self.scope = Scope::Category(cat.to_string());
-            }
-        }
     }
 
     // ── tree ──────────────────────────────────────────────────────────────
@@ -242,9 +230,11 @@ impl App {
                 rows.push(TreeRow::Section(section.clone()));
             }
             let section_collapsed = self.collapsed.contains(&section);
-            // No Category keeps its own fold state — a collapsed Categories
-            // section must not hide it
-            if section == "Categories" && !self.feeds.uncategorized().is_empty() {
+            // No Category keeps its own fold state — visible even when the
+            // Categories section is folded; sits after the category tree when
+            // the section is expanded
+            let uncat = !self.feeds.uncategorized().is_empty();
+            if section == "Categories" && section_collapsed && uncat {
                 rows.push(TreeRow::Uncategorized);
                 if self.uncat_expanded {
                     for f in self.feeds.uncategorized() {
@@ -264,11 +254,13 @@ impl App {
                 "Saved" => rows.push(TreeRow::Saved),
                 "Favourite" => {
                     rows.push(TreeRow::Favourite);
-                    for f in self.feeds.feeds.iter().filter(|f| f.favourite) {
-                        rows.push(TreeRow::FavouriteFeed(
-                            f.url.clone(),
-                            f.display_name().to_string(),
-                        ));
+                    if self.fav_expanded {
+                        for f in self.feeds.feeds.iter().filter(|f| f.favourite) {
+                            rows.push(TreeRow::FavouriteFeed(
+                                f.url.clone(),
+                                f.display_name().to_string(),
+                            ));
+                        }
                     }
                 }
                 "Categories" => {
@@ -293,6 +285,18 @@ impl App {
                                     f.url.clone(),
                                     f.display_name().to_string(),
                                     (depth * 2 + 2) as u8,
+                                ));
+                            }
+                        }
+                    }
+                    // expanded section: No Category trails the tree
+                    if uncat {
+                        rows.push(TreeRow::Uncategorized);
+                        if self.uncat_expanded {
+                            for f in self.feeds.uncategorized() {
+                                rows.push(TreeRow::UncategorizedFeed(
+                                    f.url.clone(),
+                                    f.display_name().to_string(),
                                 ));
                             }
                         }
@@ -976,50 +980,25 @@ impl App {
     // ── actions ───────────────────────────────────────────────────────────
 
     fn mark_all_read(&mut self) {
-        // flag-scoped views: mark the scoped items read directly
-        if matches!(self.scope, Scope::ReadLater | Scope::Saved | Scope::Tag(_)) {
-            let items = self.scoped_items.clone();
-            for (url, i) in items {
-                self.db.set_read(&url, &i.guid, true).ok();
-                // reading clears the read-later flag (matches open/navigation)
-                if self.scope == Scope::ReadLater {
-                    self.db.set_flag(&url, &i.guid, "read_later", false).ok();
-                }
-            }
-            self.rebuild_list();
-            self.status = "marked all read".into();
-            return;
-        }
-        let urls: Vec<String> = match &self.scope {
-            Scope::AllUnread => self.feeds.feeds.iter().map(|f| f.url.clone()).collect(),
-            Scope::Favourite => self
-                .feeds
-                .feeds
-                .iter()
-                .filter(|f| f.favourite)
-                .map(|f| f.url.clone())
-                .collect(),
-            Scope::Category(cat) => self
-                .feeds
-                .by_category(cat)
-                .iter()
-                .map(|f| f.url.clone())
-                .collect(),
-            Scope::Feed(url) => vec![url.clone()],
-            // unreachable: flag/tag scopes handled above
-            Scope::ReadLater | Scope::Saved | Scope::Tag(_) => Vec::new(),
-        };
+        // A = mark every item in every feed read
+        let urls: Vec<String> = self.feeds.feeds.iter().map(|f| f.url.clone()).collect();
         for u in urls {
             self.db.mark_all_read(&u).ok();
         }
         self.rebuild_list();
-        self.status = "marked all read".into();
+        self.status = "marked all feeds read".into();
     }
 
     fn toggle_read(&mut self) {
         let Some((url, item)) = self.current_item() else { return };
         self.db.toggle_read(&url, &item.guid).ok();
         self.rebuild_list();
+    }
+
+    /// `<space>`: toggle the current item's read state, then move down one.
+    fn toggle_read_and_next(&mut self) {
+        self.toggle_read();
+        self.move_list_sel(1);
     }
 
     fn open_browser(&mut self) {
@@ -1141,6 +1120,14 @@ fn main() -> io::Result<()> {
             if path.len() > level {
                 app.collapsed.insert(path.join("/"));
             }
+        }
+        // level 0 = fold every foldable section to a single header row
+        if level == 0 {
+            for s in ["Categories", "Tags", "Feeds"] {
+                app.collapsed.insert(s.to_string());
+            }
+            app.fav_expanded = false;
+            app.uncat_expanded = false;
         }
         app.rebuild_tree();
     }

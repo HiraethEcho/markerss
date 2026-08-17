@@ -70,7 +70,7 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                 (
                     format!("{prefix} {name}"),
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(app.theme.top)
                         .add_modifier(Modifier::BOLD),
                 )
             }
@@ -94,7 +94,8 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                     .filter(|f| f.favourite)
                     .map(|f| app.db.unread_count(&f.url).unwrap_or(0))
                     .sum();
-                (format!("Favourite ({n})"), Style::default().add_modifier(Modifier::BOLD))
+                let prefix = if app.fav_expanded { "▾" } else { "▸" };
+                (format!("{prefix} Favourite ({n})"), Style::default().add_modifier(Modifier::BOLD))
             }
             TreeRow::Uncategorized => {
                 let n: usize = app
@@ -171,16 +172,16 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                 | TreeRow::Uncategorized
         );
         let base = if is_top {
-            style.patch(Style::default().fg(Color::Yellow))
+            style.patch(Style::default().fg(app.theme.top))
         } else {
             style
         };
         // patch selection into the row style so base styles (bold etc.) survive
         let row_style = if i == app.tree_sel {
             if app.focus == 0 {
-                Style::default().bg(Color::DarkGray).fg(Color::White)
+                Style::default().bg(app.theme.selected).fg(Color::White)
             } else {
-                Style::default().fg(Color::Yellow)
+                Style::default().fg(app.theme.top)
             }
         } else {
             Style::default()
@@ -188,7 +189,9 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
         items.push(item.style(base.patch(row_style)));
     }
     frame.render_widget(
-        List::new(items).block(pane_block("Nav", app.focus == 0)),
+        List::new(items)
+            .block(pane_block("Nav", app.focus == 0, &app.theme))
+            .style(Style::default().bg(app.theme.bg)),
         area,
     );
 }
@@ -224,13 +227,13 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &App) {
         let mut li = ListItem::new(text);
         if i == app.list_sel {
             let style = if app.focus == 1 {
-                Style::default().bg(Color::DarkGray).fg(Color::White)
+                Style::default().bg(app.theme.selected).fg(Color::White)
             } else {
-                Style::default().fg(Color::Yellow)
+                Style::default().fg(app.theme.top)
             };
             li = li.style(style);
         } else if read {
-            li = li.style(Style::default().fg(Color::DarkGray));
+            li = li.style(Style::default().fg(app.theme.dim));
         }
         items.push(li);
     }
@@ -250,7 +253,9 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &App) {
         Scope::Tag(t) => format!("#{t}"),
     };
     frame.render_widget(
-        List::new(items).block(pane_block(&title, app.focus == 1)),
+        List::new(items)
+            .block(pane_block(&title, app.focus == 1, &app.theme))
+            .style(Style::default().bg(app.theme.bg)),
         area,
     );
 }
@@ -320,10 +325,18 @@ fn article_header<'a>(app: &App, url: &str, item: &'a Item, feed_name: &'a str) 
     } else {
         ""
     };
+    let author_part = if item.author.is_empty() {
+        String::new()
+    } else {
+        format!(" · {}", item.author)
+    };
     Text::from(vec![
         Line::from(Span::styled(item.display_title().to_string(), title_style)),
         Line::from(Span::styled(
-            format!("{feed_name}  ·  {}  ·  {read_mark}{flags_mark}", fmt_date(&item.date)),
+            format!(
+                "{feed_name}{author_part} · {} · {read_mark}{flags_mark}",
+                fmt_date(&item.date)
+            ),
             meta_style,
         )),
         Line::from(Span::styled(item.url.clone(), dim_style)),
@@ -334,7 +347,7 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     let Some((url, item)) = app.current_item() else {
         frame.render_widget(
             Paragraph::new("select an article")
-                .block(pane_block("Article", app.focus == 2)),
+                .block(pane_block("Article", app.focus == 2, &app.theme)),
             area,
         );
         return;
@@ -350,7 +363,7 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     let in_article = app.focus == 2;
 
     // Fixed header (title/meta/summary), content scrolls below a separator.
-    let block = pane_block("Article", app.focus == 2);
+    let block = pane_block("Article", app.focus == 2, &app.theme);
     let inner = block.inner(area);
     // fixed header: title/meta/url + 2 summary lines; the rest of a long
     // summary flows into the body area
@@ -361,7 +374,12 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     .areas(inner);
 
     let header_text = article_header(app, &url, &item, feed_name.as_str());
-    frame.render_widget(Paragraph::new(header_text).wrap(Wrap { trim: true }), head);
+    frame.render_widget(
+        Paragraph::new(header_text)
+            .style(Style::default().bg(app.theme.bg))
+            .wrap(Wrap { trim: true }),
+        head,
+    );
 
     // Body: feed/fetched HTML → markdown → styled ratatui Text
     // (h2md → tui-markdown pipeline).
@@ -445,7 +463,10 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
         width: content_w,
         height: body.height,
     };
-    frame.render_widget(para, content_area);
+    frame.render_widget(
+        para.style(Style::default().bg(app.theme.bg)),
+        content_area,
+    );
 
     // scrollbar on the pane's right edge
     let total = total_lines;
@@ -471,7 +492,14 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
         "{}  |  ? help  Q quit  F favourite  J/K unread  n/p parent  l/enter open  r fetch  R refresh",
         app.status
     );
-    frame.render_widget(Paragraph::new(line), area);
+    let status_fg = match app.cfg.background {
+        crate::config::LightDark::Light => Color::Black,
+        crate::config::LightDark::Dark => Color::White,
+    };
+    frame.render_widget(
+        Paragraph::new(line).style(Style::default().fg(status_fg).bg(app.theme.bg)),
+        area,
+    );
 }
 
 fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
@@ -538,9 +566,13 @@ fn draw_input(frame: &mut Frame, area: Rect, prompt: &InputPrompt) {
     frame.render_widget(Paragraph::new(text).block(block), box_rect);
 }
 
-fn pane_block<'a>(title: &'a str, focused: bool) -> Block<'a> {
-    let color = if focused { Color::Yellow } else { Color::DarkGray };
-    Block::bordered().title(title).border_style(Style::default().fg(color))
+fn pane_block<'a>(title: &'a str, focused: bool, theme: &crate::config::ThemeColors) -> Block<'a> {
+    let color = if focused { theme.focused } else { theme.dim };
+    Block::bordered()
+        .title(title)
+        .border_style(Style::default().fg(color))
+        .style(Style::default().bg(theme.bg))
+        .style(Style::default().bg(theme.bg))
 }
 
 #[cfg(test)]

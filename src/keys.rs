@@ -16,6 +16,7 @@ pub(crate) enum Action {
     RefreshAll,
     ToggleRead,
     MarkAllRead,
+    ToggleReadNext,
     Export,
     Browser,
     Favourite,
@@ -55,6 +56,7 @@ impl Action {
             "refresh_all" => Action::RefreshAll,
             "toggle_read" => Action::ToggleRead,
             "mark_all_read" => Action::MarkAllRead,
+            "toggle_read_next" => Action::ToggleReadNext,
             "export" => Action::Export,
             "browser" => Action::Browser,
             "favourite" => Action::Favourite,
@@ -165,6 +167,7 @@ impl App {
             Action::RefreshAll => self.refresh_all(true),
             Action::ToggleRead => self.toggle_read(),
             Action::MarkAllRead => self.mark_all_read(),
+            Action::ToggleReadNext if self.focus == 1 => self.toggle_read_and_next(),
             Action::Export => self.start_export(),
             Action::Browser => self.open_browser(),
             Action::Favourite => match self.focus {
@@ -249,12 +252,18 @@ impl App {
             Action::PrevUnread if self.focus == 1 => self.mark_read_and_jump(-1),
             // parent navigation: article → list cursor, list → nav cursor
             Action::ParentNext => match self.focus {
-                2 => self.move_list_sel(1),
+                2 => {
+                    self.mark_current_read();
+                    self.move_list_sel(1);
+                }
                 1 => self.move_nav_sel(1),
                 _ => {}
             },
             Action::ParentPrev => match self.focus {
-                2 => self.move_list_sel(-1),
+                2 => {
+                    self.mark_current_read();
+                    self.move_list_sel(-1);
+                }
                 1 => self.move_nav_sel(-1),
                 _ => {}
             },
@@ -294,8 +303,17 @@ impl App {
         }
     }
 
+    /// Mark the current item read and clear its read-later (article view).
+    fn mark_current_read(&mut self) {
+        let Some((url, item)) = self.current_item() else { return };
+        self.db.set_read(&url, &item.guid, true).ok();
+        if item.read_later {
+            self.db.set_flag(&url, &item.guid, "read_later", false).ok();
+        }
+    }
+
     /// Move the list selection one step (article preview follows).
-    fn move_list_sel(&mut self, dir: isize) {
+    pub(crate) fn move_list_sel(&mut self, dir: isize) {
         let n = self.scoped_items.len() as isize;
         if n == 0 {
             return;
@@ -491,7 +509,10 @@ impl App {
                 }
             }
             TreeRow::Favourite => {
-                // aggregate view has no fold — second left goes to nav
+                if self.fav_expanded {
+                    self.fav_expanded = false;
+                    self.rebuild_tree();
+                }
             }
             TreeRow::Uncategorized => {
                 if self.uncat_expanded {
@@ -548,7 +569,7 @@ impl App {
             TreeRow::Feed(_, _, _)
             | TreeRow::FavouriteFeed(_, _)
             | TreeRow::UncategorizedFeed(_, _) => {
-                // fold the nearest container above this row
+                // jump to and fold the nearest container above this row
                 for j in (0..self.tree_sel).rev() {
                     match &self.tree_rows[j] {
                         TreeRow::Category(c) => {
@@ -564,6 +585,7 @@ impl App {
                             return;
                         }
                         TreeRow::Favourite => {
+                            self.fav_expanded = false;
                             self.rebuild_tree();
                             self.tree_sel = j;
                             return;
@@ -595,27 +617,27 @@ impl App {
             Some(TreeRow::Section(name)) if self.collapsed.contains(&name) => {
                 self.collapsed.remove(&name);
                 self.rebuild_tree();
-                self.step_into_expanded();
             }
             Some(TreeRow::Section(_)) => {}
             Some(TreeRow::Category(cat)) if self.collapsed.contains(&cat) => {
                 self.collapsed.remove(&cat);
                 self.rebuild_tree();
-                self.step_into_expanded();
+            }
+            Some(TreeRow::Favourite) if !self.fav_expanded => {
+                self.fav_expanded = true;
+                self.rebuild_tree();
             }
             Some(TreeRow::Favourite) => {
-                // aggregate view: descend into the list of favourited items
+                // already expanded — descend into the aggregate list
                 self.select_scope(&TreeRow::Favourite.clone());
             }
             Some(TreeRow::Uncategorized) if !self.uncat_expanded => {
                 self.uncat_expanded = true;
                 self.rebuild_tree();
-                self.step_into_expanded();
             }
             Some(TreeRow::Tag(t)) if self.collapsed.contains(&format!("tag:{t}")) => {
                 self.collapsed.remove(&format!("tag:{t}"));
                 self.rebuild_tree();
-                self.step_into_expanded();
             }
             Some(row) => self.select_scope(&row),
             None => {}
@@ -623,12 +645,6 @@ impl App {
     }
 
     /// After expanding a fold, move the cursor to its first child row.
-    fn step_into_expanded(&mut self) {
-        if self.tree_sel + 1 < self.tree_rows.len() {
-            self.tree_sel += 1;
-        }
-    }
-
     fn nav_key(&mut self, key: KeyCode) {
         match key {
             KeyCode::Char('j') | KeyCode::Down => {

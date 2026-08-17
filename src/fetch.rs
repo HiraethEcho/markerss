@@ -58,6 +58,12 @@ pub fn refresh_feed(url: &str, timeout_secs: u64) -> Result<(Option<String>, Vec
                 .or(e.updated)
                 .map(|d| d.to_rfc3339())
                 .unwrap_or_default();
+            let author = e
+                .authors
+                .iter()
+                .filter(|a| !a.name.is_empty()).map(|a| a.name.clone())
+                .collect::<Vec<_>>()
+                .join(", ");
             Item {
                 guid,
                 title,
@@ -65,6 +71,7 @@ pub fn refresh_feed(url: &str, timeout_secs: u64) -> Result<(Option<String>, Vec
                 summary,
                 content,
                 date,
+                author,
                 read_later: false,
                 saved: false,
             }

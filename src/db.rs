@@ -31,6 +31,7 @@ impl Db {
                 summary  TEXT NOT NULL DEFAULT '',
                 content  TEXT NOT NULL DEFAULT '',
                 date     TEXT NOT NULL DEFAULT '',
+                author   TEXT NOT NULL DEFAULT '',
                 read     INTEGER NOT NULL DEFAULT 0,
                 read_later INTEGER NOT NULL DEFAULT 0,
                 saved    INTEGER NOT NULL DEFAULT 0,
@@ -41,7 +42,11 @@ impl Db {
             ",
         )?;
         // migrate older DBs (add flag columns if missing)
-        for (col, def) in [("read_later", "INTEGER NOT NULL DEFAULT 0"), ("saved", "INTEGER NOT NULL DEFAULT 0")] {
+        for (col, def) in [
+            ("read_later", "INTEGER NOT NULL DEFAULT 0"),
+            ("saved", "INTEGER NOT NULL DEFAULT 0"),
+            ("author", "TEXT NOT NULL DEFAULT ''"),
+        ] {
             let has: bool = conn
                 .prepare("SELECT 1 FROM pragma_table_info('items') WHERE name = ?1")?
                 .query_row([col], |_| Ok(true))
@@ -66,13 +71,13 @@ impl Db {
         {
             let mut ins = tx.prepare(
                 "INSERT OR IGNORE INTO items
-                 (feed_url, guid, title, url, summary, content, date, read, read_later, saved, fetched_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, 0, 0, ?8)",
+                 (feed_url, guid, title, url, summary, content, date, author, read, read_later, saved, fetched_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, 0, 0, ?9)",
             )?;
             let mut upd = tx.prepare(
-                "UPDATE items SET title = ?3, url = ?4, summary = ?5, date = ?6,
-                        content = CASE WHEN content = '' THEN ?7 ELSE content END,
-                        fetched_at = CASE WHEN content = '' THEN ?8 ELSE fetched_at END
+                "UPDATE items SET title = ?3, url = ?4, summary = ?5, date = ?6, author = ?7,
+                        content = CASE WHEN content = '' THEN ?8 ELSE content END,
+                        fetched_at = CASE WHEN content = '' THEN ?9 ELSE fetched_at END
                  WHERE feed_url = ?1 AND guid = ?2",
             )?;
             let now = chrono::Utc::now().to_rfc3339();
@@ -85,13 +90,14 @@ impl Db {
                     i.summary,
                     i.content,
                     i.date,
+                    i.author,
                     now,
                 ])?;
                 if n > 0 {
                     added.push(i.guid.clone());
                 }
                 upd.execute(rusqlite::params![
-                    feed_url, i.guid, i.title, i.url, i.summary, i.date, i.content, now
+                    feed_url, i.guid, i.title, i.url, i.summary, i.date, i.author, i.content, now
                 ])?;
             }
         }
@@ -117,7 +123,7 @@ impl Db {
             let mut keep_rows: Vec<Item> = Vec::new();
             {
                 let mut q = tx.prepare(
-                    "SELECT guid, title, url, summary, content, date, read, read_later, saved, fetched_at FROM items WHERE feed_url = ?1",
+                    "SELECT guid, title, url, summary, content, date, author, read, read_later, saved, fetched_at FROM items WHERE feed_url = ?1",
                 )?;
                 let rows = q.query_map([feed_url], |r| {
                     Ok((
@@ -127,27 +133,28 @@ impl Db {
                         r.get::<_, String>(3)?, // summary
                         r.get::<_, String>(4)?, // content
                         r.get::<_, String>(5)?, // date
-                        r.get::<_, i64>(6)?,   // read
-                        r.get::<_, i64>(7)?,   // read_later
-                        r.get::<_, i64>(8)?,   // saved
-                        r.get::<_, String>(9)?, // fetched_at
+                        r.get::<_, String>(6)?, // author
+                        r.get::<_, i64>(7)?,   // read
+                        r.get::<_, i64>(8)?,   // read_later
+                        r.get::<_, i64>(9)?,   // saved
+                        r.get::<_, String>(10)?, // fetched_at
                     ))
                 })?;
                 for row in rows.flatten() {
-                    if row.6 != 0 {
+                    if row.7 != 0 {
                         read_guids.insert(row.0.clone());
                     }
                     if !row.4.is_empty() {
                         content_map.insert(row.0.clone(), row.4.clone());
-                        fetched_map.insert(row.0.clone(), row.9);
-                    }
-                    if row.7 != 0 {
-                        later_map.insert(row.0.clone());
+                        fetched_map.insert(row.0.clone(), row.10);
                     }
                     if row.8 != 0 {
+                        later_map.insert(row.0.clone());
+                    }
+                    if row.9 != 0 {
                         saved_map.insert(row.0.clone());
                     }
-                    if row.7 != 0 || row.8 != 0 {
+                    if row.8 != 0 || row.9 != 0 {
                         keep_rows.push(Item {
                             guid: row.0,
                             title: row.1,
@@ -155,8 +162,9 @@ impl Db {
                             summary: row.3,
                             content: row.4,
                             date: row.5,
-                            read_later: row.7 != 0,
-                            saved: row.8 != 0,
+                            author: row.6,
+                            read_later: row.8 != 0,
+                            saved: row.9 != 0,
                         });
                     }
                 }
@@ -166,8 +174,8 @@ impl Db {
             let now = chrono::Utc::now().to_rfc3339();
             let mut ins = tx.prepare(
                 "INSERT OR REPLACE INTO items
-                 (feed_url, guid, title, url, summary, content, date, read, read_later, saved, fetched_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                 (feed_url, guid, title, url, summary, content, date, author, read, read_later, saved, fetched_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             )?;
             for i in items {
                 let read = if read_guids.contains(&i.guid) { 1 } else { 0 };
@@ -191,6 +199,7 @@ impl Db {
                     i.summary,
                     content,
                     i.date,
+                    i.author,
                     read,
                     later,
                     saved,
@@ -211,6 +220,7 @@ impl Db {
                     k.summary,
                     k.content,
                     k.date,
+                    k.author,
                     1,
                     k.read_later as i64,
                     k.saved as i64,
@@ -232,7 +242,7 @@ impl Db {
 
     pub fn items_for_feed(&self, feed_url: &str) -> rusqlite::Result<Vec<Item>> {
         let mut stmt = self.conn.prepare(
-            "SELECT guid, title, url, summary, content, date, read_later, saved
+            "SELECT guid, title, url, summary, content, date, author, read_later, saved
              FROM items WHERE feed_url = ?1",
         )?;
         let rows = stmt.query_map([feed_url], |r| {
@@ -243,8 +253,9 @@ impl Db {
                 summary: r.get(3)?,
                 content: r.get(4)?,
                 date: r.get(5)?,
-                read_later: r.get::<_, i64>(6)? != 0,
-                saved: r.get::<_, i64>(7)? != 0,
+                author: r.get(6)?,
+                read_later: r.get::<_, i64>(7)? != 0,
+                saved: r.get::<_, i64>(8)? != 0,
             })
         })?;
         rows.collect()
@@ -258,7 +269,7 @@ impl Db {
             _ => return Ok(Vec::new()),
         };
         let sql = format!(
-            "SELECT feed_url, guid, title, url, summary, content, date, read_later, saved
+            "SELECT feed_url, guid, title, url, summary, content, date, author, read_later, saved
              FROM items WHERE {col} = 1"
         );
         let mut stmt = self.conn.prepare(&sql)?;
@@ -272,8 +283,9 @@ impl Db {
                     summary: r.get(4)?,
                     content: r.get(5)?,
                     date: r.get(6)?,
-                    read_later: r.get::<_, i64>(7)? != 0,
-                    saved: r.get::<_, i64>(8)? != 0,
+                    author: r.get(7)?,
+                    read_later: r.get::<_, i64>(8)? != 0,
+                    saved: r.get::<_, i64>(9)? != 0,
                 },
             ))
         })?;
@@ -398,6 +410,7 @@ mod tests {
             summary: String::new(),
             content: String::new(),
             date: String::new(),
+            author: String::new(),
             read_later: false,
             saved: false,
         }
@@ -458,7 +471,7 @@ mod flag_tests {
     }
 
     fn item(guid: &str) -> Item {
-        Item { guid: guid.into(), title: String::new(), url: String::new(), summary: String::new(), content: String::new(), date: String::new(), read_later: false, saved: false }
+        Item { guid: guid.into(), title: String::new(), url: String::new(), summary: String::new(), content: String::new(), date: String::new(), author: String::new(), read_later: false, saved: false }
     }
 
     #[test]
@@ -511,7 +524,7 @@ mod upsert_tests {
     }
 
     fn item(guid: &str, title: &str) -> Item {
-        Item { guid: guid.into(), title: title.into(), url: String::new(), summary: String::new(), content: String::new(), date: "2026-01-01".into(), read_later: false, saved: false }
+        Item { guid: guid.into(), title: title.into(), url: String::new(), summary: String::new(), content: String::new(), date: "2026-01-01".into(), author: String::new(), read_later: false, saved: false }
     }
 
     #[test]

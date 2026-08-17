@@ -116,18 +116,6 @@ impl File {
     }
 
     /// Distinct categories in tree order, feeds of `None` = uncategorized.
-    pub fn categories(&self) -> Vec<String> {
-        let mut out: Vec<String> = Vec::new();
-        for f in &self.feeds {
-            if let Some(c) = f.category() {
-                if !out.iter().any(|x| x == c) {
-                    out.push(c.to_string());
-                }
-            }
-        }
-        out
-    }
-
     pub fn by_category(&self, cat: &str) -> Vec<&Feed> {
         self.feeds
             .iter()
@@ -359,7 +347,10 @@ mod tests {
         file.upsert(parse_line(r#"https://b.com/f "B" tech"#).unwrap());
         file.upsert(parse_line(r#"https://c.com/f "C" blog"#).unwrap());
         file.upsert(parse_line(r#"https://d.com/f"#).unwrap());
-        assert_eq!(file.categories(), vec!["tech", "blog"]);
+        assert_eq!(
+            file.categories_tree(),
+            vec![vec!["tech".to_string()], vec!["blog".to_string()]]
+        );
         assert_eq!(file.by_category("tech").len(), 2);
         assert_eq!(file.uncategorized().len(), 1);
     }
@@ -413,8 +404,14 @@ mod tests {
         assert_eq!(file.by_category("systems/lang").len(), 1);
         assert_eq!(file.by_category("dev/go").len(), 1);
         assert_eq!(
-            file.categories(),
-            vec!["systems", "systems/lang", "dev/go", "blog"]
+            file.categories_tree(),
+            vec![
+                vec!["systems".to_string()],
+                vec!["systems".to_string(), "lang".to_string()],
+                vec!["dev".to_string()],
+                vec!["dev".to_string(), "go".to_string()],
+                vec!["blog".to_string()],
+            ]
         );
     }
 }

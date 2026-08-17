@@ -26,6 +26,7 @@ pub const DEFAULT_KEYS: &[(&str, &[&str])] = &[
     ("refresh", &["r"]),
     ("refresh_all", &["R"]),
     ("toggle_read", &["a"]),
+    ("toggle_read_next", &["<space>"]),
     ("mark_all_read", &["A"]),
     ("export", &["e"]),
     ("browser", &["o"]),
@@ -77,6 +78,14 @@ pub struct ThemeColors {
     pub styles: MdStyleSheet,
     pub accent: Color,
     pub dim: Color,
+    /// Active-pane border.
+    pub focused: Color,
+    /// Selected row highlight (nav + list).
+    pub selected: Color,
+    /// Nav top-level parent entries highlight.
+    pub top: Color,
+    /// Base background (status bar / scheme baseline).
+    pub bg: Color,
 }
 
 impl Default for ThemeColors {
@@ -85,7 +94,33 @@ impl Default for ThemeColors {
             styles: MdStyleSheet::default(),
             accent: Color::Yellow,
             dim: Color::DarkGray,
+            focused: Color::Yellow,
+            selected: Color::DarkGray,
+            top: Color::Yellow,
+            bg: Color::Black,
         }
+    }
+}
+
+/// Light base palette (dark text on light terminal).
+pub fn light_theme() -> ThemeColors {
+    ThemeColors {
+        focused: Color::Blue,
+        selected: Color::Gray,
+        top: Color::Blue,
+        bg: Color::White,
+        accent: Color::Blue,
+        dim: Color::DarkGray,
+        styles: MdStyleSheet {
+            accent: Color::Blue,
+            dim: Color::Gray,
+            h1: Color::Blue,
+            h2: Color::Blue,
+            h3: Color::Magenta,
+            code: Color::Green,
+            link: Color::Blue,
+            quote: Color::DarkGray,
+        },
     }
 }
 
@@ -94,27 +129,46 @@ impl Default for ThemeColors {
 pub struct MdStyleSheet {
     pub accent: Color,
     pub dim: Color,
+    pub h1: Color,
+    pub h2: Color,
+    pub h3: Color,
+    pub code: Color,
+    pub link: Color,
+    pub quote: Color,
 }
 
 impl Default for MdStyleSheet {
     fn default() -> Self {
-        Self { accent: Color::Yellow, dim: Color::DarkGray }
+        Self {
+            accent: Color::Yellow,
+            dim: Color::DarkGray,
+            h1: Color::Yellow,
+            h2: Color::Yellow,
+            h3: Color::Blue,
+            code: Color::Yellow,
+            link: Color::Yellow,
+            quote: Color::Gray,
+        }
     }
 }
 
 impl tui_markdown::StyleSheet for MdStyleSheet {
     fn heading(&self, level: u8) -> Style {
-        let c = if level <= 2 { self.accent } else { Color::Blue };
+        let c = match level {
+            1 => self.h1,
+            2 => self.h2,
+            _ => self.h3,
+        };
         Style::new().fg(c).add_modifier(Modifier::BOLD)
     }
     fn code(&self) -> Style {
-        Style::new().fg(Color::Yellow)
+        Style::new().fg(self.code)
     }
     fn link(&self) -> Style {
-        Style::new().fg(self.accent).add_modifier(Modifier::UNDERLINED)
+        Style::new().fg(self.link).add_modifier(Modifier::UNDERLINED)
     }
     fn blockquote(&self) -> Style {
-        Style::new().fg(self.dim).add_modifier(Modifier::ITALIC)
+        Style::new().fg(self.quote).add_modifier(Modifier::ITALIC)
     }
     fn table_header(&self) -> Style {
         Style::new().fg(self.accent).add_modifier(Modifier::BOLD)
@@ -134,11 +188,15 @@ impl tui_markdown::StyleSheet for MdStyleSheet {
 }
 
 impl ThemeColors {
-    pub fn load(path: Option<&PathBuf>) -> ThemeColors {
-        let mut t = ThemeColors::default();
+    pub fn load(path: Option<&PathBuf>, mode: LightDark) -> ThemeColors {
+        // base palette depends on light/dark
+        let mut t = match mode {
+            LightDark::Dark => ThemeColors::default(),
+            LightDark::Light => light_theme(),
+        };
         let Some(p) = path else { return t };
         let Ok(text) = fs::read_to_string(p) else { return t };
-        #[derive(Deserialize, Default)]
+        #[derive(Deserialize, Default, Clone)]
         #[serde(default)]
         struct RawTheme {
             h1: Option<String>,
@@ -149,26 +207,88 @@ impl ThemeColors {
             link: Option<String>,
             accent: Option<String>,
             dim: Option<String>,
+            focused: Option<String>,
+            selected: Option<String>,
+            top: Option<String>,
+            background: Option<String>,
         }
-        let raw: RawTheme = match toml::from_str(&text) {
+        // one file carries both modes: [light] / [dark] tables; a flat file
+        // (no sections) applies to the current mode
+        #[derive(Deserialize, Default)]
+        #[serde(default)]
+        struct RawFile {
+            light: Option<RawTheme>,
+            dark: Option<RawTheme>,
+        }
+        let file: RawFile = match toml::from_str(&text) {
             Ok(r) => r,
             Err(_) => return t,
         };
-        if let Some(c) = raw.accent.as_deref().and_then(color_from_str) {
+        // flat file (no [light]/[dark]) — treat the whole file as current mode
+        let raw = if file.dark.is_none() && file.light.is_none() {
+            toml::from_str::<RawTheme>(&text).unwrap_or_default()
+        } else {
+            match mode {
+                LightDark::Dark => file.dark.or(file.light),
+                LightDark::Light => file.light.or(file.dark),
+            }
+            .unwrap_or_default()
+        };
+        let pick = |v: &Option<String>| v.as_deref().and_then(color_from_str);
+        for (from, to) in [
+            (&raw.accent, &mut t.accent),
+            (&raw.dim, &mut t.dim),
+            (&raw.focused, &mut t.focused),
+            (&raw.selected, &mut t.selected),
+            (&raw.top, &mut t.top),
+            (&raw.background, &mut t.bg),
+        ] {
+            if let Some(c) = pick(from) {
+                *to = c;
+            }
+        }
+        let mut styles = t.styles.clone();
+        if let Some(c) = pick(&raw.accent) {
+            styles.accent = c;
             t.accent = c;
-            t.styles.accent = c;
         }
-        if let Some(c) = raw.dim.as_deref().and_then(color_from_str) {
+        if let Some(c) = pick(&raw.dim) {
+            styles.dim = c;
             t.dim = c;
-            t.styles.dim = c;
         }
+        for (from, field) in [
+            (&raw.h1, &mut styles.h1),
+            (&raw.h2, &mut styles.h2),
+            (&raw.h3, &mut styles.h3),
+            (&raw.code, &mut styles.code),
+            (&raw.link, &mut styles.link),
+            (&raw.quote, &mut styles.quote),
+        ] {
+            if let Some(c) = pick(from) {
+                *field = c;
+            }
+        }
+        t.styles = styles;
         t
     }
 }
 
 /// Named color → ratatui Color (16-color palette).
 pub fn color_from_str(s: &str) -> Option<Color> {
-    Some(match s.to_ascii_lowercase().as_str() {
+    let s = s.trim().to_ascii_lowercase();
+    if let Some(hex) = s.strip_prefix('#') {
+        if hex.len() == 6 {
+            if let (Ok(r), Ok(g), Ok(b)) = (
+                u8::from_str_radix(&hex[0..2], 16),
+                u8::from_str_radix(&hex[2..4], 16),
+                u8::from_str_radix(&hex[4..6], 16),
+            ) {
+                return Some(Color::Rgb(r, g, b));
+            }
+        }
+        return None;
+    }
+    Some(match s.as_str() {
         "black" => Color::Black,
         "red" => Color::Red,
         "green" => Color::Green,
@@ -200,6 +320,7 @@ struct RawConfig {
     sort: Option<Vec<String>>,
     foldlevel: Option<usize>,
     reading_width: Option<u64>,
+    background: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -215,6 +336,13 @@ enum RefreshCfg {
 pub enum KeySpec {
     One(String),
     Many(Vec<String>),
+}
+
+/// Base color scheme selected by `background` in config.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LightDark {
+    Light,
+    Dark,
 }
 
 
@@ -239,6 +367,7 @@ pub struct Config {
     pub foldlevel: Option<usize>,
     pub reading_width: u64,
     pub keybindings: std::collections::HashMap<String, Vec<String>>,
+    pub background: LightDark,
 }
 
 impl Config {
@@ -265,6 +394,7 @@ impl Config {
             foldlevel: None,
             reading_width: 0,
             keybindings: default_keybindings(),
+            background: LightDark::Dark,
             config_dir: config_dir.clone(),
         };
 
@@ -302,6 +432,12 @@ impl Config {
         }
         self.foldlevel = raw.foldlevel;
         self.reading_width = raw.reading_width.unwrap_or(0);
+        if let Some(b) = raw.background {
+            self.background = match b.to_ascii_lowercase().as_str() {
+                "light" => LightDark::Light,
+                _ => LightDark::Dark,
+            };
+        }
         if let Some(k) = raw.keybindings {
             self.apply_keybindings(k);
         }
@@ -551,7 +687,7 @@ mod advanced_tests {
         std::fs::create_dir_all(&dir).ok();
         let path = dir.join("theme.toml");
         std::fs::write(&path, "accent = \"green\"\nh1 = \"red\"\ncode = \"cyan\"\n").ok();
-        let t = ThemeColors::load(Some(&path));
+        let t = ThemeColors::load(Some(&path), LightDark::Dark);
         assert_eq!(t.accent, Color::Green);
         assert_eq!(t.styles.accent, Color::Green);
         std::fs::remove_dir_all(&dir).ok();
