@@ -313,6 +313,7 @@ struct RawConfig {
     refresh: Option<RefreshCfg>,
     fetch_timeout: Option<u64>,
     max_items_per_feed: Option<usize>,
+    db_path: Option<String>,
     theme: Option<String>,
     pane_ratio: Option<Vec<f64>>,
     nav_presets: Option<Vec<Vec<String>>>,
@@ -426,7 +427,10 @@ impl Config {
         }
         self.max_items_per_feed = raw.max_items_per_feed;
         if let Some(v) = raw.theme {
-            self.theme_path = Some(expand_tilde(&v));
+            self.theme_path = Some(resolve_config_path(&v, &self.config_dir));
+        }
+        if let Some(v) = raw.db_path {
+            self.db_path = resolve_config_path(&v, &self.config_dir);
         }
         if let Some(v) = raw.sort {
             self.sort = v.into_iter().take(3).collect();
@@ -466,6 +470,17 @@ impl Config {
 }
 
 /// Expand a leading `~` to the home directory (no-op otherwise).
+/// Resolve `~`, then make relative paths relative to the config dir
+/// (so theme/db settings work no matter where markerss is launched).
+fn resolve_config_path(p: &str, config_dir: &std::path::Path) -> PathBuf {
+    let expanded = expand_tilde(p);
+    if expanded.is_absolute() {
+        expanded
+    } else {
+        config_dir.join(expanded)
+    }
+}
+
 fn expand_tilde(p: &str) -> PathBuf {
     if let Some(rest) = p.strip_prefix("~/") {
         if let Some(home) = std::env::var_os("HOME") {

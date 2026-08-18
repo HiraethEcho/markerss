@@ -223,7 +223,7 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             ""
         };
-        let text = format!("{marker} {}{flags}", item.display_title());
+        let text = format!("{marker} {flags} {}", item.display_title());
         let mut li = ListItem::new(text);
         if i == app.list_sel {
             let style = if app.focus == 1 {

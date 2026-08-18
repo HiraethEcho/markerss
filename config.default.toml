@@ -3,6 +3,10 @@
 # Read at startup; restart to apply. Unknown keys ignored; missing → defaults.
 
 # ── storage / cleanup ──────────────────────────────────────────────────────
+# SQLite database path. Relative paths resolve against ~/.config/markerss.
+# Default: $XDG_CACHE_HOME/markerss/markerss.db
+# db_path = "~/var/markerss.db"
+
 # Purge stored content older than N days at startup.
 # (Items flagged `saved` are exempt.)
 # Default: 14
@@ -56,7 +60,8 @@ background = "dark"
 # None = built-in palette (light_theme / dark defaults).
 # Keys: background focused selected top accent dim h1 h2 h3 code quote link
 # Colors: named or #rrggbb truecolor
-# theme = "~/.config/markerss/theme.toml"
+# Relative names resolve against ~/.config/markerss.
+# theme = "nord.toml"
 
 # ── nav folding / sort ─────────────────────────────────────────────────────
 # Initial fold depth of the Categories tree. None = all open.
