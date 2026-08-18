@@ -76,7 +76,7 @@ background = "dark"
 # Map of action → key string or list (combos like "gg", specials like "<enter>").
 # A standalone keybindings.toml (same format) replaces this map when present.
 # Actions: open back quit refresh refresh_all toggle_read toggle_read_next
-# mark_all_read export browser favourite read_later saved new_feed delete
+# mark_list_read mark_all_read export browser favourite read_later saved new_feed delete
 # rename edit_tags help focus_next focus_prev search jump_top jump_bottom
 # next_unread prev_unread parent_next parent_prev copy_item_url copy_item_title
 # copy_feed_url sort_time sort_title sort_feed sort_unread sort_*_rev

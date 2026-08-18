@@ -980,17 +980,28 @@ impl App {
     // ── actions ───────────────────────────────────────────────────────────
 
     fn mark_all_read(&mut self, full: bool) {
-        // A = mark every item in every feed read
-        let urls: Vec<String> = if full {
-            self.feeds.feeds.iter().map(|f| f.url.clone()).collect()
-        } else {
-            self.scope_feeds()
-        };
-        for u in urls {
-            self.db.mark_all_read(&u).ok();
+        if full {
+            // A = mark every item in every feed read
+            let urls: Vec<String> = self.feeds.feeds.iter().map(|f| f.url.clone()).collect();
+            for u in urls {
+                self.db.mark_all_read(&u).ok();
+            }
+            self.rebuild_list();
+            self.status = "marked all feeds read".into();
+            return;
+        }
+        // a = mark every item currently in the list read. Using scoped_items
+        // (rather than whole feeds) keeps flag-scoped/search views precise.
+        let items = self.scoped_items.clone();
+        for (url, item) in items {
+            self.db.set_read(&url, &item.guid, true).ok();
+            // matching open/read behaviour: reading clears read-later
+            if item.read_later {
+                self.db.set_flag(&url, &item.guid, "read_later", false).ok();
+            }
         }
         self.rebuild_list();
-        self.status = "marked all feeds read".into();
+        self.status = "marked current list read".into();
     }
 
     fn toggle_read(&mut self) {

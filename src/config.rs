@@ -25,9 +25,9 @@ pub const DEFAULT_KEYS: &[(&str, &[&str])] = &[
     ("quit", &["Q"]),
     ("refresh", &["r"]),
     ("refresh_all", &["R"]),
-    ("toggle_read", &["a"]),
+    ("toggle_read", &["u"]),
     ("toggle_read_next", &["<space>"]),
-    ("mark_read", &["a"]),
+    ("mark_list_read", &["a"]),
     ("mark_all_read", &["A"]),
     ("export", &["e"]),
     ("browser", &["o"]),
@@ -657,6 +657,14 @@ mod tests {
     #[test]
     fn missing_file_none() {
         assert!(load_raw(&std::path::Path::new("/nonexistent/config")).is_none());
+    }
+
+    #[test]
+    fn default_mark_keys_are_distinct() {
+        let kb = default_keybindings();
+        assert_eq!(kb.get("mark_list_read").map(|v| v[0].as_str()), Some("a"));
+        assert_eq!(kb.get("mark_all_read").map(|v| v[0].as_str()), Some("A"));
+        assert_eq!(kb.get("toggle_read").map(|v| v[0].as_str()), Some("u"));
     }
 }
 

@@ -15,7 +15,7 @@ pub(crate) enum Action {
     Refresh,
     RefreshAll,
     ToggleRead,
-    MarkRead,
+    MarkListRead,
     MarkAllRead,
     ToggleReadNext,
     Export,
@@ -56,7 +56,7 @@ impl Action {
             "refresh" => Action::Refresh,
             "refresh_all" => Action::RefreshAll,
             "toggle_read" => Action::ToggleRead,
-            "mark_read" => Action::MarkRead,
+            "mark_list_read" => Action::MarkListRead,
             "mark_all_read" => Action::MarkAllRead,
             "toggle_read_next" => Action::ToggleReadNext,
             "export" => Action::Export,
@@ -168,7 +168,7 @@ impl App {
             Action::Refresh => self.refresh_all(false),
             Action::RefreshAll => self.refresh_all(true),
             Action::ToggleRead => self.toggle_read(),
-            Action::MarkRead => self.mark_all_read(false),
+            Action::MarkListRead => self.mark_all_read(false),
             Action::MarkAllRead => self.mark_all_read(true),
             Action::ToggleReadNext if self.focus == 1 => self.toggle_read_and_next(),
             Action::Export => self.start_export(),
@@ -851,6 +851,8 @@ mod tests {
     fn parse_actions() {
         assert_eq!(Action::from_str("open"), Some(Action::Open));
         assert_eq!(Action::from_str("refresh_all"), Some(Action::RefreshAll));
+        assert_eq!(Action::from_str("mark_list_read"), Some(Action::MarkListRead));
+        assert_eq!(Action::from_str("mark_all_read"), Some(Action::MarkAllRead));
         assert_eq!(Action::from_str("bogus"), None);
     }
 
@@ -873,6 +875,14 @@ mod tests {
         assert_eq!(m.len(), 2); // o + enter, both → open
         assert_eq!(m.get(&vec![KeyCode::Char('o')]), Some(&Action::Open));
         assert_eq!(m.get(&vec![KeyCode::Enter]), Some(&Action::Open));
+    }
+
+    #[test]
+    fn default_keymap_binds_mark_read() {
+        let m = build_keymap(&crate::config::default_keybindings());
+        assert_eq!(m.get(&vec![KeyCode::Char('a')]), Some(&Action::MarkListRead));
+        assert_eq!(m.get(&vec![KeyCode::Char('A')]), Some(&Action::MarkAllRead));
+        assert_eq!(m.get(&vec![KeyCode::Char('u')]), Some(&Action::ToggleRead));
     }
 
     #[test]

@@ -149,8 +149,9 @@ Directional movement: `h`/`q`/`esc` = LEFT, `l`/`enter` = RIGHT (+ arrow keys `�
 | j/k | article | scroll |
 | n/p | list | mark current read + jump to next/prev unread (no reorder) |
 | n/p | article | next/prev item (marks read, clears read-later) |
-| a | list+article | toggle read/unread |
-| A | list | mark all unread in view read |
+| u | list+article | toggle read/unread |
+| a | list | mark all items in current list read |
+| A | list | mark all items in all feeds read |
 | <c-u>/<c-d> | list+article | scroll half page |
 | o | list+article | open in browser |
 | e | list+article | export markdown (rename prompt, default prefilled) |
@@ -182,7 +183,7 @@ Advanced keys (planned, unbound or remapped — see Advanced): `gg/G`, `Ctrl+f/b
 | Persistence | SQLite (items + content + read flags) | Single-file, queryable, preserves state across refresh | 2026-08 |
 | Layout | 3 panes: nav tree / item list / article | Mirrors mail-client pattern | 2026-08 |
 | Tree | Preset-driven sections: Unread/Read Later/Favourite/Categories/Tags/Saved/Feeds/No Category; foldable except Unread/Read Later/Saved | single nav pane, mail-client pattern | 2026-08 |
-| Keys | h/q/esc left, l/enter right; a/A/N/M/F/L/S/t/r/R/i/x/Q | Explicit directional nav + per-action keys | 2026-08 |
+| Keys | h/q/esc left, l/enter right; u/a/A/N/M/F/L/S/t/r/R/i/x/Q | Explicit directional nav + per-action keys | 2026-08 |
 | Feed source | newsboat `urls` format, read live | Zero migration; coexists with newsboat; single source of truth | 2026-08 |
 | Category vs tags | one category (tree placement) + multi `#tags` (optional) | category = structure, tags = cross-cutting | 2026-08 |
 | Article flow | List enter = open + read; article enter = fetch full only (no auto-fetch) | Fetch only on explicit action; summary-only until opened | 2026-08 |
@@ -208,7 +209,7 @@ Advanced keys (planned, unbound or remapped — see Advanced): `gg/G`, `Ctrl+f/b
   - `fetch_timeout` — per-request timeout.
   - `max_items_per_feed` — cap items kept per feed.
   - `reading_width` — max article body columns (0 = fill pane).
-  - `keybindings` — map of action → key string or list (single keys, combos like `gg`, specials like `<enter>`), in config.toml `[keybindings]` or standalone `keybindings.toml` (replaces the config map). Combos match via a prefix buffer; ctrl chords are never rebindable. Actions: open back quit refresh refresh_all toggle_read mark_all_read export browser favourite read_later saved new_feed delete rename edit_tags help focus_next focus_prev search jump_top jump_bottom next_unread prev_unread parent_next parent_prev copy_item_url copy_item_title copy_feed_url sort_time sort_title sort_feed sort_unread sort_*_rev cycle_preset import_opml export_opml.
+  - `keybindings` — map of action → key string or list (single keys, combos like `gg`, specials like `<enter>`), in config.toml `[keybindings]` or standalone `keybindings.toml` (replaces the config map). Combos match via a prefix buffer; ctrl chords are never rebindable. Actions: open back quit refresh refresh_all toggle_read mark_read mark_all_read (alias mark_read_all) export browser favourite read_later saved new_feed delete rename edit_tags help focus_next focus_prev search jump_top jump_bottom next_unread prev_unread parent_next parent_prev copy_item_url copy_item_title copy_feed_url sort_time sort_title sort_feed sort_unread sort_*_rev cycle_preset import_opml export_opml.
   - `default_view` — startup scope, e.g. `Feed:<url>` / `Category:<name>`.
 - Read at startup; defaults + XDG fallbacks when keys absent. No hot-reload in MVP.
 

@@ -514,7 +514,7 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
          jump:  gg/G top/bottom (nav+list+article)\n\
          sort:  st/sn/sf/su forward · sT/sN/sF/sU reversed — time/title/feed/unread\n\
          copy:  yy url · yn title · yp feed url\n\
-         global: o browser · e export · a read · A all-read · L/S flags · r/R refresh\n\
+         global: o browser · e export · a list read · A all feeds read · u toggle read · L/S flags · r/R refresh\n\
          i/x OPML · t preset · tab focus · Q quit · ? help\n\n\
          export → $XDG_DATA_HOME/markerss/<category>/<slug>.md",
     );
