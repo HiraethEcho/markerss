@@ -256,16 +256,16 @@ impl App {
             // parent navigation: article → list cursor, list → nav cursor
             Action::ParentNext => match self.focus {
                 2 => {
-                    self.mark_current_read();
                     self.move_list_sel(1);
+                    self.mark_current_read();
                 }
                 1 => self.move_nav_sel(1),
                 _ => {}
             },
             Action::ParentPrev => match self.focus {
                 2 => {
-                    self.mark_current_read();
                     self.move_list_sel(-1);
+                    self.mark_current_read();
                 }
                 1 => self.move_nav_sel(-1),
                 _ => {}
