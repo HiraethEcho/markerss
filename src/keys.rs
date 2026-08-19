@@ -39,6 +39,8 @@ pub(crate) enum Action {
     CopyItemUrl,
     CopyItemTitle,
     CopyFeedUrl,
+    CopyItemSummary,
+    CopyItemContent,
     Sort { level: &'static str, reverse: bool },
     FocusPrev,
     CyclePreset,
@@ -80,6 +82,8 @@ impl Action {
             "copy_item_url" => Action::CopyItemUrl,
             "copy_item_title" => Action::CopyItemTitle,
             "copy_feed_url" => Action::CopyFeedUrl,
+            "copy_item_summary" => Action::CopyItemSummary,
+            "copy_item_content" => Action::CopyItemContent,
             "sort_time" => Action::Sort { level: "time", reverse: false },
             "sort_title" => Action::Sort { level: "title", reverse: false },
             "sort_feed" => Action::Sort { level: "feed", reverse: false },
@@ -283,6 +287,28 @@ impl App {
                     self.status = "copied item title".into();
                 }
             }
+            Action::CopyItemSummary if self.focus >= 1 => {
+                if let Some((_, item)) = self.current_item() {
+                    let md = self.article_markdown_summary(&item);
+                    if md.is_empty() {
+                        self.status = "no summary to copy".into();
+                    } else {
+                        copy_to_clipboard(&md);
+                        self.status = "copied summary".into();
+                    }
+                }
+            }
+            Action::CopyItemContent if self.focus >= 1 => {
+                if let Some((_, item)) = self.current_item() {
+                    let md = self.article_markdown_body(&item);
+                    if md.is_empty() {
+                        self.status = "no content to copy".into();
+                    } else {
+                        copy_to_clipboard(&md);
+                        self.status = "copied full content".into();
+                    }
+                }
+            }
             Action::CopyFeedUrl => {
                 let url = match self.focus {
                     0 => self.tree_rows.get(self.tree_sel).and_then(|r| match r {
@@ -424,6 +450,15 @@ impl App {
             .keys()
             .any(|k| k.len() > self.pending_keys.len() && k.starts_with(&self.pending_keys));
         if is_prefix {
+            match self.pending_keys.as_slice() {
+                [KeyCode::Char('y')] => {
+                    self.status = "y: yy url · yn title · yp feed · ys summary · yc content".into();
+                }
+                [KeyCode::Char('s')] => {
+                    self.status = "s: st/sn/sf/su forward · sT/sN/sF/sU reversed".into();
+                }
+                _ => {}
+            }
             return;
         }
         // no combo — treat the last key alone (after clearing the buffer)
@@ -856,6 +891,8 @@ mod tests {
         assert_eq!(Action::from_str("refresh_all"), Some(Action::RefreshAll));
         assert_eq!(Action::from_str("mark_list_read"), Some(Action::MarkListRead));
         assert_eq!(Action::from_str("mark_all_read"), Some(Action::MarkAllRead));
+        assert_eq!(Action::from_str("copy_item_summary"), Some(Action::CopyItemSummary));
+        assert_eq!(Action::from_str("copy_item_content"), Some(Action::CopyItemContent));
         assert_eq!(Action::from_str("bogus"), None);
     }
 

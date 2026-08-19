@@ -79,6 +79,6 @@ background = "dark"
 # mark_list_read mark_all_read export browser favourite read_later saved new_feed delete
 # rename edit_tags help focus_next focus_prev search jump_top jump_bottom
 # next_unread prev_unread parent_next parent_prev copy_item_url copy_item_title
-# copy_feed_url sort_time sort_title sort_feed sort_unread sort_*_rev
+# copy_feed_url copy_item_summary copy_item_content sort_time sort_title sort_feed sort_unread sort_*_rev
 # cycle_preset import_opml export_opml
 # keybindings = { "next_unread" = ["e"] }

@@ -164,7 +164,7 @@ Directional movement: `h`/`q`/`esc` = LEFT, `l`/`enter` = RIGHT (+ arrow keys `�
 | n/p | global | parent navigation: article → list cursor, list → nav cursor |
 | J/K | list | next/prev unread (mark read + jump) |
 | gg | nav+list+article | jump top |
-| yy/yn/yp | list+nav | copy item url / title / feed url |
+| yy/yn/yp/ys/yc | list+nav | copy item url / title / feed url / summary / full content (markdown) |
 | L / S | list+article | toggle read-later / saved (again to cancel; L marks unread) |
 | t | nav | cycle nav preset |
 | r / R | global | partial refresh (current scope) / full refresh (rebuild) |
@@ -209,7 +209,7 @@ Advanced keys (planned, unbound or remapped — see Advanced): `gg/G`, `Ctrl+f/b
   - `fetch_timeout` — per-request timeout.
   - `max_items_per_feed` — cap items kept per feed.
   - `reading_width` — max article body columns (0 = fill pane).
-  - `keybindings` — map of action → key string or list (single keys, combos like `gg`, specials like `<enter>`), in config.toml `[keybindings]` or standalone `keybindings.toml` (replaces the config map). Combos match via a prefix buffer; ctrl chords are never rebindable. Actions: open back quit refresh refresh_all toggle_read mark_read mark_all_read (alias mark_read_all) export browser favourite read_later saved new_feed delete rename edit_tags help focus_next focus_prev search jump_top jump_bottom next_unread prev_unread parent_next parent_prev copy_item_url copy_item_title copy_feed_url sort_time sort_title sort_feed sort_unread sort_*_rev cycle_preset import_opml export_opml.
+  - `keybindings` — map of action → key string or list (single keys, combos like `gg`, specials like `<enter>`), in config.toml `[keybindings]` or standalone `keybindings.toml` (replaces the config map). Combos match via a prefix buffer; ctrl chords are never rebindable. Actions: open back quit refresh refresh_all toggle_read mark_read mark_all_read (alias mark_read_all) export browser favourite read_later saved new_feed delete rename edit_tags help focus_next focus_prev search jump_top jump_bottom next_unread prev_unread parent_next parent_prev copy_item_url copy_item_title copy_feed_url copy_item_summary copy_item_content sort_time sort_title sort_feed sort_unread sort_*_rev cycle_preset import_opml export_opml.
   - `default_view` — startup scope, e.g. `Feed:<url>` / `Category:<name>`.
 - Read at startup; defaults + XDG fallbacks when keys absent. No hot-reload in MVP.
 
@@ -331,7 +331,7 @@ Status per key — **[done]** rust implemented · **[dropped]** user removed · 
 - `gg` / `G` — jump to top / bottom (nav + list + article). **[done]**
 - `Ctrl+f` / `Ctrl+b` — full page down / up (list + article). **[done]**
 - `/` — modal search in list pane: live filter over title+summary; `enter` keeps the filter active (new appends still re-filter), `esc` or **left (`h`/`q`/`esc`) stops it** — the pre-search list is restored (first left cancels search and stays in the list; a second left goes back to nav). **[done]**
-- `yy` / `yn` — copy item URL / title (list + article). `yf` — copy feed URL. **[done]** (OSC52, no dependency)
+- `yy` / `yn` — copy item URL / title (list + article). `yf` — copy feed URL. `ys` / `yc` — copy summary / full content (summary + content, markdown). **[done]** (OSC52, no dependency)
 - `st` / `sn` / `sf` / `su` — push a sort level (time / title / feed / unread-first). **Last pressed = highest priority** (front of array): `st` → `["time"]`, then `sf` → `["feed", "time"]`. Keep only the last 3 presses — a 4th drops the oldest. **[done]**
 - `sT`/`sN`/`sF`/`sU` — push the same level **reversed** (per-level direction: `sT` = time ascending). **[done]**
 - `s` / `y` alone show their combo help in the status bar. **[done]**

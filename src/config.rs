@@ -51,6 +51,8 @@ pub const DEFAULT_KEYS: &[(&str, &[&str])] = &[
     ("copy_item_url", &["yy"]),
     ("copy_item_title", &["yn"]),
     ("copy_feed_url", &["yp"]),
+    ("copy_item_summary", &["ys"]),
+    ("copy_item_content", &["yc"]),
     ("sort_time", &["st"]),
     ("sort_title", &["sn"]),
     ("sort_feed", &["sf"]),

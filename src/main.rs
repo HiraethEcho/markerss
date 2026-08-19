@@ -514,6 +514,36 @@ impl App {
         }
     }
 
+    /// Summary as markdown (HTML → markdown), empty when the feed has none.
+    fn article_markdown_summary(&self, item: &Item) -> String {
+        if item.summary.trim().is_empty() {
+            String::new()
+        } else {
+            fetch::html_to_markdown(&item.summary)
+        }
+    }
+
+    /// Full article body as markdown: summary + content, in order — matches
+    /// what the article pane shows. Empty when the feed has neither.
+    fn article_markdown_body(&self, item: &Item) -> String {
+        let summary_md = if !item.summary.trim().is_empty() {
+            Some(fetch::html_to_markdown(&item.summary))
+        } else {
+            None
+        };
+        let content_md = if !item.content.trim().is_empty() {
+            Some(fetch::html_to_markdown(&item.content))
+        } else {
+            None
+        };
+        match (summary_md, content_md) {
+            (Some(s), Some(c)) => format!("{s}\n\n{c}"),
+            (Some(s), None) => s,
+            (None, Some(c)) => c,
+            (None, None) => String::new(),
+        }
+    }
+
     fn fetch_article(&mut self) {
         let Some((_, item)) = self.current_item() else { return };
         if item.url.is_empty() {
