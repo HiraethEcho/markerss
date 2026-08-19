@@ -237,6 +237,7 @@ impl App {
                 0 => self.tree_sel = 0,
                 1 => {
                     self.list_sel = 0;
+                    self.list_offset = 0;
                     self.article_scroll = 0;
                 }
                 2 => self.article_scroll = 0,
@@ -765,6 +766,7 @@ impl App {
                 .collect();
         }
         self.list_sel = 0;
+        self.list_offset = 0;
         self.article_scroll = 0;
     }
 
@@ -788,6 +790,7 @@ impl App {
             self.rebuild_list();
         }
         self.list_sel = 0;
+        self.list_offset = 0;
     }
 
     /// Push a sort level (last pressed = highest priority); keep last 3.

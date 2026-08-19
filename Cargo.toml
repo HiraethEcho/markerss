@@ -3,8 +3,16 @@ name = "markerss"
 version = "0.1.0"
 edition = "2021"
 
+# Release build tuning: full optimization + link-time optimization across
+# codegen units. (target-cpu=native is machine-specific — set it via
+# RUSTFLAGS="-C target-cpu=native" when building for your own machine.)
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
 [dependencies]
-ratatui = "0.30.2"
+ratatui = { version = "0.30.2", features = ["unstable-rendered-line-info"] }
 crossterm = "0.29"
 dirs = "6"
 reqwest = { version = "0.13.4", features = ["blocking", "gzip"] }

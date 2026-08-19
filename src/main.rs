@@ -107,6 +107,10 @@ struct App {
     // list
     scope: Scope,
     list_sel: usize,
+    /// Viewport offset for the item list — sticky: the window only moves when
+    /// the selection crosses an edge (stays still when scrolling up from the
+    /// bottom until the selection reaches the top of the window).
+    list_offset: usize,
     scoped_items: Vec<(String, Item)>, // (feed_url, item)
 
     // article
@@ -174,6 +178,7 @@ impl App {
             tree_rows: Vec::new(),
             scope: Scope::AllUnread,
             list_sel: 0,
+            list_offset: 0,
             scoped_items: Vec::new(),
             article_scroll: 0,
             fetching: false,
@@ -367,6 +372,7 @@ impl App {
             TreeRow::Uncategorized => Scope::AllUnread,
         };
         self.list_sel = 0;
+        self.list_offset = 0;
         self.clear_search();
         self.rebuild_list();
         self.focus = 1;
@@ -392,6 +398,7 @@ impl App {
             TreeRow::Uncategorized => Scope::AllUnread,
             };
             self.list_sel = 0;
+            self.list_offset = 0;
             self.clear_search();
             self.rebuild_list();
         }
@@ -460,6 +467,9 @@ impl App {
         self.reapply_search_filter();
         if self.list_sel >= self.scoped_items.len() {
             self.list_sel = self.scoped_items.len().saturating_sub(1);
+        }
+        if self.list_offset >= self.scoped_items.len() {
+            self.list_offset = self.scoped_items.len().saturating_sub(1);
         }
     }
 

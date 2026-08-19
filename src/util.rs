@@ -29,13 +29,6 @@ pub(crate) fn fmt_date(iso: &str) -> String {
     iso.chars().take(10).collect()
 }
 
-/// Approximate terminal display width (CJK wide chars count 2).
-pub(crate) fn display_width(s: &str) -> usize {
-    s.chars()
-        .map(|c| if (c as u32) >= 0x2E80 { 2 } else { 1 })
-        .sum()
-}
-
 #[cfg(test)]
 mod html_tests {
     use super::*;

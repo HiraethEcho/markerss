@@ -8,7 +8,7 @@ use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::model::Item;
-use crate::util::{display_width, fmt_date};
+use crate::util::fmt_date;
 use crate::{App, InputMode, InputPrompt, Scope, TreeRow};
 
 pub(crate) fn render(frame: &mut Frame, app: &mut App) {
@@ -196,14 +196,32 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
     );
 }
 
-fn draw_list(frame: &mut Frame, area: Rect, app: &App) {
+/// Sticky scroll offset for the item list: the window only moves when the
+/// selection crosses an edge. Scrolling up from the bottom keeps the window
+/// still until the selection reaches the top of the window, then the window
+/// scrolls up. Scrolling down pins the selection to the bottom edge.
+fn sticky_offset(sel: usize, offset: usize, visible: usize) -> usize {
+    if sel < offset {
+        sel
+    } else if sel >= offset + visible {
+        sel - visible + 1
+    } else {
+        offset
+    }
+}
+
+fn draw_list(frame: &mut Frame, area: Rect, app: &mut App) {
     let mut items: Vec<ListItem> = Vec::new();
     if app.scoped_items.is_empty() {
         items.push(ListItem::new("no items — r to refresh"));
     }
-    // window around the selection so long lists scroll with the cursor
+    // window around the selection so long lists scroll with the cursor.
+    // Sticky scroll: the viewport only moves when the selection crosses an
+    // edge — scrolling up from the bottom keeps the window still until the
+    // selection reaches the top of the window, then the window scrolls up.
     let visible = (area.height as usize).saturating_sub(2).max(1);
-    let offset = app.list_sel.saturating_sub(visible.saturating_sub(1));
+    app.list_offset = sticky_offset(app.list_sel, app.list_offset, visible);
+    let offset = app.list_offset;
     let window: Vec<(usize, &(String, Item))> = app
         .scoped_items
         .iter()
@@ -386,40 +404,46 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     // Links render as underlined alt text (no URL); images as [img].
     // body markdown: preview = full summary; article = summary + content
     // (both, in order, no truncation, no duplication)
-    let summary_md = if !item.summary.trim().is_empty() {
-        Some(crate::fetch::html_to_markdown(&item.summary))
+    // The HTML→markdown conversion is expensive, so it runs only on a cache
+    // miss (content change / mode switch) — never per frame.
+    let key = (url.clone(), item.guid.clone(), in_article);
+    let body_text = if matches!(&app.article_render, Some((k, _)) if k == &key) {
+        app.article_render.as_ref().map(|(_, t)| t.clone()).unwrap_or_default()
     } else {
-        None
-    };
-    let content_md = if !item.content.trim().is_empty() {
-        Some(crate::fetch::html_to_markdown(&item.content))
-    } else {
-        None
-    };
-    let md = if in_article {
-        match (summary_md, content_md) {
-            (Some(s), Some(c)) => format!("{s}\n\n{c}"),
-            (Some(s), None) => s,
-            (None, Some(c)) => c,
-            (None, None) => String::new(),
-        }
-    } else {
-        summary_md.unwrap_or_default()
-    };
-    let body_text = if !md.trim().is_empty() {
-        // cache per (feed_url, guid, mode)
-        let key = (url.clone(), item.guid.clone(), in_article);
-        if !matches!(&app.article_render, Some((k, _)) if k == &key) {
+        let summary_md = if !item.summary.trim().is_empty() {
+            Some(crate::fetch::html_to_markdown(&item.summary))
+        } else {
+            None
+        };
+        let content_md = if !item.content.trim().is_empty() {
+            Some(crate::fetch::html_to_markdown(&item.content))
+        } else {
+            None
+        };
+        let md = if in_article {
+            match (summary_md, content_md) {
+                (Some(s), Some(c)) => format!("{s}\n\n{c}"),
+                (Some(s), None) => s,
+                (None, Some(c)) => c,
+                (None, None) => String::new(),
+            }
+        } else {
+            summary_md.unwrap_or_default()
+        };
+        if md.trim().is_empty() {
+            // cheap hint states — never cached (fetching flips frequently)
+            if app.fetching {
+                Text::from("fetching…")
+            } else if in_article {
+                Text::from("") // feed has neither summary nor content — enter fetches
+            } else {
+                Text::from("l/enter to read")
+            }
+        } else {
             let t = render_markdown(app, &md);
             app.article_render = Some((key, t.clone()));
+            t
         }
-        app.article_render.as_ref().map(|(_, t)| t.clone()).unwrap_or_default()
-    } else if app.fetching {
-        Text::from("fetching…")
-    } else if in_article {
-        Text::from("") // feed has neither summary nor content — enter fetches
-    } else {
-        Text::from("l/enter to read")
     };
     // reading width: cap (and center) only when configured (>0 = unlimited)
     let content_w = if app.cfg.reading_width > 0 {
@@ -429,34 +453,22 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     };
     let x_off = (body.width - content_w) / 2;
 
-    let content_w_est = content_w.max(1) as usize;
-
     frame.render_widget(block, area);
 
-    // ── TUI images ─────────────────────────────────────────────────────────
-    // Replace `[img]` rows with image-height blank rows (exact layout) and
-    // overlay decoded pictures on the blanks. `scroll` is clamped to the
-    // expanded text so images never push the bottom out of reach.
-    // clamp scroll to the estimated wrapped content height
-    let est_lines: u16 = body_text
-        .lines
-        .iter()
-        .map(|l| {
-            let t: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
-            display_width(&t).div_ceil(content_w_est).max(1) as u16
-        })
-        .sum();
-    let max_scroll = est_lines.saturating_sub(body.height);
+    // clamp scroll to the exact wrapped content height. Paragraph::line_count
+    // uses the same WordWrapper as rendering, so the bottom is always
+    // reachable — the old width-based estimate could cut content short
+    // (e.g. after fetching full text for a summary-only item).
+    let para = Paragraph::new(body_text).wrap(Wrap { trim: true });
+    let total_lines = para.line_count(content_w.max(1)) as u16;
+    let max_scroll = total_lines.saturating_sub(body.height);
     let scroll = app.article_scroll.min(max_scroll);
     // write back only in article mode — in list mode the body is a one-line
     // hint and clamping would zero the saved article position
     if in_article {
         app.article_scroll = scroll;
     }
-    let total_lines = body_text.lines.len() as u16;
-    let para = Paragraph::new(body_text)
-        .wrap(Wrap { trim: true })
-        .scroll((scroll, 0));
+    let para = para.scroll((scroll, 0));
     let content_area = Rect {
         x: body.x + x_off,
         y: body.y,
@@ -595,5 +607,40 @@ mod tests {
         assert!(md.contains("Title"), "got: {md}");
         assert!(md.contains("**bold**"), "got: {md}");
         assert!(md.contains("[link](https://e.com)"), "got: {md}");
+    }
+
+    #[test]
+    fn sticky_offset_scrolls_down_pins_bottom() {
+        // scrolling down: selection pinned to the bottom edge once the list
+        // is longer than the window
+        let mut off = 0;
+        for sel in 0..=25 {
+            off = sticky_offset(sel, off, 20);
+        }
+        assert_eq!(off, 6); // 25 - 20 + 1
+        assert_eq!(sticky_offset(26, off, 20), 7);
+    }
+
+    #[test]
+    fn sticky_offset_scroll_up_keeps_window_still() {
+        // at the bottom (sel 99, offset 80, window 20) scrolling up keeps the
+        // window still until the selection reaches the top edge (80)
+        let mut off = 80;
+        for sel in (80..=99).rev() {
+            off = sticky_offset(sel, off, 20);
+            assert_eq!(off, 80, "window must stay still at sel {sel}");
+        }
+        // crossing the top edge scrolls the window up
+        assert_eq!(sticky_offset(79, off, 20), 79);
+    }
+
+    #[test]
+    fn sticky_offset_short_list_stays_at_top() {
+        // list shorter than the window: offset stays 0
+        let mut off = 0;
+        for sel in 0..=5 {
+            off = sticky_offset(sel, off, 20);
+            assert_eq!(off, 0);
+        }
     }
 }
