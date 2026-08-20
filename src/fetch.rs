@@ -72,6 +72,7 @@ pub fn refresh_feed(url: &str, timeout_secs: u64) -> Result<(Option<String>, Vec
                 content,
                 date,
                 author,
+                read: false,
                 read_later: false,
                 saved: false,
             }

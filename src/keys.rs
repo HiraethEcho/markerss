@@ -340,6 +340,7 @@ impl App {
         if item.read_later {
             self.db.set_flag(&url, &item.guid, "read_later", false).ok();
         }
+        self.mark_scoped_read(&url, &item.guid, true);
     }
 
     /// Move the list selection one step (article preview follows).
@@ -727,6 +728,7 @@ impl App {
         if item.read_later {
             self.db.set_flag(&url, &item.guid, "read_later", false).ok();
         }
+        self.mark_scoped_read(&url, &item.guid, true);
         let n = self.scoped_items.len() as isize;
         let mut i = self.list_sel as isize;
         loop {
@@ -735,8 +737,8 @@ impl App {
                 // no unread in that direction — stay on current
                 break;
             }
-            let (u, it) = &self.scoped_items[i as usize];
-            if !self.db.is_read(u, &it.guid).unwrap_or(false) {
+            let (_, it) = &self.scoped_items[i as usize];
+            if !it.read {
                 self.list_sel = i as usize;
                 self.article_scroll = 0;
                 break;
@@ -852,7 +854,7 @@ impl App {
         let read_set: std::collections::HashSet<(String, String)> = self
             .scoped_items
             .iter()
-            .filter(|(u, i)| self.db.is_read(u, &i.guid).unwrap_or(false))
+            .filter(|(_, i)| i.read)
             .map(|(u, i)| (u.clone(), i.guid.clone()))
             .collect();
         self.scoped_items.sort_by(|(ua, a), (ub, b)| {

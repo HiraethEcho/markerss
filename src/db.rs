@@ -163,6 +163,7 @@ impl Db {
                             content: row.4,
                             date: row.5,
                             author: row.6,
+                            read: row.7 != 0,
                             read_later: row.8 != 0,
                             saved: row.9 != 0,
                         });
@@ -242,7 +243,7 @@ impl Db {
 
     pub fn items_for_feed(&self, feed_url: &str) -> rusqlite::Result<Vec<Item>> {
         let mut stmt = self.conn.prepare(
-            "SELECT guid, title, url, summary, content, date, author, read_later, saved
+            "SELECT guid, title, url, summary, content, date, author, read, read_later, saved
              FROM items WHERE feed_url = ?1",
         )?;
         let rows = stmt.query_map([feed_url], |r| {
@@ -254,8 +255,9 @@ impl Db {
                 content: r.get(4)?,
                 date: r.get(5)?,
                 author: r.get(6)?,
-                read_later: r.get::<_, i64>(7)? != 0,
-                saved: r.get::<_, i64>(8)? != 0,
+                read: r.get::<_, i64>(7)? != 0,
+                read_later: r.get::<_, i64>(8)? != 0,
+                saved: r.get::<_, i64>(9)? != 0,
             })
         })?;
         rows.collect()
@@ -269,7 +271,7 @@ impl Db {
             _ => return Ok(Vec::new()),
         };
         let sql = format!(
-            "SELECT feed_url, guid, title, url, summary, content, date, author, read_later, saved
+            "SELECT feed_url, guid, title, url, summary, content, date, author, read, read_later, saved
              FROM items WHERE {col} = 1"
         );
         let mut stmt = self.conn.prepare(&sql)?;
@@ -284,12 +286,43 @@ impl Db {
                     content: r.get(5)?,
                     date: r.get(6)?,
                     author: r.get(7)?,
-                    read_later: r.get::<_, i64>(8)? != 0,
-                    saved: r.get::<_, i64>(9)? != 0,
+                    read: r.get::<_, i64>(8)? != 0,
+                    read_later: r.get::<_, i64>(9)? != 0,
+                    saved: r.get::<_, i64>(10)? != 0,
                 },
             ))
         })?;
         rows.collect()
+    }
+
+    /// COUNT of items with a flag set — for nav node badges (no row loads).
+    pub fn flag_count(&self, flag: &str) -> rusqlite::Result<usize> {
+        let col = match flag {
+            "read_later" | "saved" => flag,
+            _ => return Ok(0),
+        };
+        let n: i64 = self.conn.query_row(
+            &format!("SELECT COUNT(*) FROM items WHERE {col} = 1"),
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(n as usize)
+    }
+
+    /// Per-feed unread counts in one grouped query (avoids F lookups/frame).
+    pub fn unread_counts(&self) -> rusqlite::Result<std::collections::HashMap<String, usize>> {
+        use std::collections::HashMap;
+        let mut m = HashMap::new();
+        let mut stmt = self.conn.prepare(
+            "SELECT feed_url, COUNT(*) FROM items WHERE read = 0 GROUP BY feed_url",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as usize))
+        })?;
+        for r in rows.flatten() {
+            m.insert(r.0, r.1);
+        }
+        Ok(m)
     }
 
     pub fn set_flag(&mut self, feed_url: &str, guid: &str, flag: &str, on: bool) -> rusqlite::Result<()> {
@@ -348,15 +381,6 @@ impl Db {
         Ok(())
     }
 
-    pub fn unread_count(&self, feed_url: &str) -> rusqlite::Result<usize> {
-        let n: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM items WHERE feed_url = ?1 AND read = 0",
-            [feed_url],
-            |r| r.get(0),
-        )?;
-        Ok(n as usize)
-    }
-
     pub fn total_unread(&self) -> rusqlite::Result<usize> {
         let n: i64 =
             self.conn
@@ -410,6 +434,7 @@ mod tests {
             summary: String::new(),
             content: String::new(),
             date: String::new(),
+            read: false,
             author: String::new(),
             read_later: false,
             saved: false,
@@ -422,7 +447,7 @@ mod tests {
         db.replace_feed_items_preserving_read("https://f.com", &[item("a"), item("b")]).unwrap();
         let items = db.items_for_feed("https://f.com").unwrap();
         assert_eq!(items.len(), 2);
-        assert!(db.unread_count("https://f.com").unwrap() == 2);
+        assert_eq!(db.total_unread().unwrap(), 2);
     }
 
     #[test]
@@ -442,7 +467,6 @@ mod tests {
         assert!(db.toggle_read("https://f.com", "a").unwrap());
         assert!(!db.toggle_read("https://f.com", "a").unwrap());
         db.mark_all_read("https://f.com").unwrap();
-        assert_eq!(db.unread_count("https://f.com").unwrap(), 0);
         assert_eq!(db.total_unread().unwrap(), 0);
     }
 
@@ -471,7 +495,7 @@ mod flag_tests {
     }
 
     fn item(guid: &str) -> Item {
-        Item { guid: guid.into(), title: String::new(), url: String::new(), summary: String::new(), content: String::new(), date: String::new(), author: String::new(), read_later: false, saved: false }
+        Item { guid: guid.into(), title: String::new(), url: String::new(), summary: String::new(), content: String::new(), date: String::new(), author: String::new(), read: false, read_later: false, saved: false }
     }
 
     #[test]
@@ -524,7 +548,7 @@ mod upsert_tests {
     }
 
     fn item(guid: &str, title: &str) -> Item {
-        Item { guid: guid.into(), title: title.into(), url: String::new(), summary: String::new(), content: String::new(), date: "2026-01-01".into(), author: String::new(), read_later: false, saved: false }
+        Item { guid: guid.into(), title: title.into(), url: String::new(), summary: String::new(), content: String::new(), date: "2026-01-01".into(), author: String::new(), read: false, read_later: false, saved: false }
     }
 
     #[test]

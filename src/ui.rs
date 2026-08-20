@@ -75,16 +75,13 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                 )
             }
             TreeRow::AllUnread => {
-                let n = app.db.total_unread().unwrap_or(0);
-                (format!("Unread ({n})"), Style::default().add_modifier(Modifier::BOLD))
+                (format!("Unread ({})", app.total_unread), Style::default().add_modifier(Modifier::BOLD))
             }
             TreeRow::ReadLater => {
-                let n = app.db.items_with_flag("read_later").unwrap_or_default().len();
-                (format!("Read Later ({n})"), Style::default().add_modifier(Modifier::BOLD))
+                (format!("Read Later ({})", app.later_count), Style::default().add_modifier(Modifier::BOLD))
             }
             TreeRow::Saved => {
-                let n = app.db.items_with_flag("saved").unwrap_or_default().len();
-                (format!("Saved ({n})"), Style::default().add_modifier(Modifier::BOLD))
+                (format!("Saved ({})", app.saved_count), Style::default().add_modifier(Modifier::BOLD))
             }
             TreeRow::Favourite => {
                 let n: usize = app
@@ -92,7 +89,7 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                     .feeds
                     .iter()
                     .filter(|f| f.favourite)
-                    .map(|f| app.db.unread_count(&f.url).unwrap_or(0))
+                    .map(|f| app.unread(&f.url))
                     .sum();
                 let prefix = if app.fav_expanded { "▾" } else { "▸" };
                 (format!("{prefix} Favourite ({n})"), Style::default().add_modifier(Modifier::BOLD))
@@ -102,7 +99,7 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                     .feeds
                     .uncategorized()
                     .iter()
-                    .map(|f| app.db.unread_count(&f.url).unwrap_or(0))
+                    .map(|f| app.unread(&f.url))
                     .sum();
                 let prefix = if app.uncat_expanded { "▾" } else { "▸" };
                 (
@@ -116,9 +113,7 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                     .feeds
                     .iter()
                     .find(|x| x.display_name() == name.as_str());
-                let n = f
-                    .map(|x| app.db.unread_count(&x.url).unwrap_or(0))
-                    .unwrap_or(0);
+                let n = f.map(|x| app.unread(&x.url)).unwrap_or(0);
                 let mark = f
                     .filter(|x| app.feed_errors.contains_key(&x.url))
                     .map(|_| " !")
@@ -130,14 +125,15 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                     .feeds
                     .by_category(cat)
                     .iter()
-                    .map(|f| app.db.unread_count(&f.url).unwrap_or(0))
+                    .map(|f| app.unread(&f.url))
                     .sum();
                 let prefix = if app.collapsed.contains(cat) { "▸" } else { "▾" };
                 let indent = cat.matches('/').count() * 2 + 2;
                 (format!("{}{prefix} {cat} ({n})", " ".repeat(indent)), Style::default())
             }
+
             TreeRow::Feed(url, name, indent) => {
-                let n = app.db.unread_count(url).unwrap_or(0);
+                let n = app.unread(url);
                 let mark = if app.feed_errors.contains_key(url.as_str()) { " !" } else { "" };
                 (
                     format!("{}{} ({n}){mark}", " ".repeat(*indent as usize), name),
@@ -150,7 +146,7 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                     .feeds
                     .iter()
                     .filter(|f| f.has_tag(t))
-                    .map(|f| app.db.unread_count(&f.url).unwrap_or(0))
+                    .map(|f| app.unread(&f.url))
                     .sum();
                 let prefix = if app.collapsed.contains(&format!("tag:{t}")) {
                     "▸"
@@ -229,8 +225,8 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App) {
         .skip(offset)
         .take(visible)
         .collect();
-    for (i, (url, item)) in window {
-        let read = app.db.is_read(url, &item.guid).unwrap_or(false);
+    for (i, (_, item)) in window {
+        let read = item.read;
         let marker = if read { " " } else { "•" };
         let flags = if item.saved && item.read_later {
             " [SL]"
@@ -325,11 +321,11 @@ fn render_markdown(app: &App, md: &str) -> Text<'static> {
 }
 
 /// Header text: title / meta (feed · date · read · flags) / url / summary.
-fn article_header<'a>(app: &App, url: &str, item: &'a Item, feed_name: &'a str) -> Text<'a> {
+fn article_header<'a>(app: &App, item: &'a Item, feed_name: &'a str) -> Text<'a> {
     let title_style = Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD);
     let meta_style = Style::default().fg(app.theme.dim);
     let dim_style = Style::default().fg(app.theme.dim);
-    let read_mark = if app.db.is_read(url, &item.guid).unwrap_or(false) {
+    let read_mark = if item.read {
         "read"
     } else {
         "unread"
@@ -391,7 +387,7 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
     ])
     .areas(inner);
 
-    let header_text = article_header(app, &url, &item, feed_name.as_str());
+    let header_text = article_header(app, &item, feed_name.as_str());
     frame.render_widget(
         Paragraph::new(header_text)
             .style(Style::default().bg(app.theme.bg))

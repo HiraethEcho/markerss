@@ -113,6 +113,12 @@ struct App {
     list_offset: usize,
     scoped_items: Vec<(String, Item)>, // (feed_url, item)
 
+    // in-memory unread/flag counts, refreshed via `recount` — avoids per-frame SQL
+    unread: std::collections::HashMap<String, usize>,
+    total_unread: usize,
+    later_count: usize,
+    saved_count: usize,
+
     // article
     article_scroll: u16,
     fetching: bool,
@@ -180,6 +186,10 @@ impl App {
             list_sel: 0,
             list_offset: 0,
             scoped_items: Vec::new(),
+            unread: std::collections::HashMap::new(),
+            total_unread: 0,
+            later_count: 0,
+            saved_count: 0,
             article_scroll: 0,
             fetching: false,
             article_render: None,
@@ -206,7 +216,33 @@ impl App {
         };
         app.rebuild_tree();
         app.rebuild_list();
+        app.recount();
         app
+    }
+
+    /// Refresh in-memory unread/flag counts from the DB (one grouped query).
+    fn recount(&mut self) {
+        self.unread = self.db.unread_counts().unwrap_or_default();
+        self.total_unread = self.db.total_unread().unwrap_or(0);
+        self.later_count = self.db.flag_count("read_later").unwrap_or(0);
+        self.saved_count = self.db.flag_count("saved").unwrap_or(0);
+    }
+
+    /// Cached per-feed unread count for the nav pane.
+    fn unread(&self, url: &str) -> usize {
+        self.unread.get(url).copied().unwrap_or(0)
+    }
+
+    /// In-place reflect a read/later change in the list snapshot (no rebuild).
+    fn mark_scoped_read(&mut self, feed_url: &str, guid: &str, clear_later: bool) {
+        for (u, i) in self.scoped_items.iter_mut() {
+            if u == feed_url && i.guid == guid {
+                i.read = true;
+                if clear_later {
+                    i.read_later = false;
+                }
+            }
+        }
     }
 
     // ── tree ──────────────────────────────────────────────────────────────
@@ -414,7 +450,7 @@ impl App {
                     if let Ok(list) = self.db.items_for_feed(&f.url) {
                         for i in list {
                             // startup/refresh view = unread only
-                            if !self.db.is_read(&f.url, &i.guid).unwrap_or(false) {
+                            if !i.read {
                                 items.push((f.url.clone(), i));
                             }
                         }
@@ -491,6 +527,8 @@ impl App {
         if item.read_later {
             self.db.set_flag(&url, &item.guid, "read_later", false).ok();
         }
+        // reflect the read/flag change in the in-memory snapshot
+        self.mark_scoped_read(&url, &item.guid, true);
         self.focus = 2;
         self.article_scroll = 0;
         // summary-only until opened — fetch full content only on explicit
@@ -970,7 +1008,7 @@ impl App {
             for i in list {
                 if added.contains(&i.guid)
                     && !existing.contains(&i.guid)
-                    && !self.db.is_read(feed_url, &i.guid).unwrap_or(false)
+                    && !i.read
                 {
                     fresh.push((feed_url.to_string(), i));
                 }
@@ -1158,6 +1196,7 @@ impl App {
                 if item.read_later {
                     self.db.set_flag(&url, &item.guid, "read_later", false).ok();
                 }
+                self.mark_scoped_read(&url, &item.guid, true);
                 // no rebuild — keeps the current view stable
             }
         }
@@ -1222,6 +1261,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()>
                 // Press + Repeat (held keys auto-repeat), not Release
                 if matches!(k.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
                     app.on_key(k.code, k.modifiers);
+                    app.recount();
                 }
                 redraw = true;
             }
@@ -1230,16 +1270,24 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()>
                 match event::read()? {
                     Event::Key(k) if matches!(k.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
                         app.on_key(k.code, k.modifiers);
+                        app.recount();
                         redraw = true;
                     }
-                    _ => redraw = true, // Resize etc. → repaint
+                    Event::Resize(_w, _h) => {
+                        // terminal.draw() re-queries size each frame — just repaint
+                        redraw = true;
+                    }
+                    _ => redraw = true, // other events → repaint
                 }
             }
         }
         while let Ok(msg) = app.rx.try_recv() {
             redraw = true;
             match msg {
-                Msg::FeedRefreshed { url, result, full } => app.handle_feed_refreshed(url, result, full),
+                Msg::FeedRefreshed { url, result, full } => {
+                    app.handle_feed_refreshed(url, result, full);
+                    app.recount();
+                }
                 Msg::ArticleFetched { url, guid, result } => {
                     app.handle_article_fetched(url, guid, result)
                 }

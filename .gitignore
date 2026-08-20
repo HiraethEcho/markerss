@@ -1,2 +1,6 @@
 /.agents
 /target
+
+# profiling artifacts
+/perf.data
+/flamegraph.svg
