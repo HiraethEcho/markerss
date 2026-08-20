@@ -1,0 +1,30 @@
+[package]
+name = "markerss"
+version = "0.1.0"
+edition = "2021"
+
+# Release build tuning: full optimization + link-time optimization across
+# codegen units. (target-cpu=native is machine-specific — set it via
+# RUSTFLAGS="-C target-cpu=native" when building for your own machine.)
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[dependencies]
+ratatui = { version = "0.30.2", features = ["unstable-rendered-line-info"] }
+crossterm = "0.29"
+dirs = "6"
+reqwest = { version = "0.13.4", features = ["blocking", "gzip"] }
+feed-rs = "2.4.0"
+serde = "1.0.229"
+chrono = "0.4.45"
+quick-xml = "0.41.0"
+dom_smoothie = "0.18.0"
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+regex = "1.13.1"
+toml = "1.1.4"
+serde_json = "1.0.151"
+serde_yaml = "0.9.34"
+h2md = "0.3.1"
+tui-markdown = "0.3.9"

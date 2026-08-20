@@ -1,0 +1,58 @@
+# markerss theme — built-in default palette (reference).
+# Copy to ~/.config/markerss/theme.toml (or your own name) and point
+# `theme = "name.toml"` at it. One file carries both modes:
+#   [light] + [dark] — `background` in config.toml selects the section.
+# A flat file (no sections) applies to the current mode.
+# Values are named colors or #rrggbb truecolor.
+#
+# Colors: black red green yellow blue magenta cyan gray darkgray white + #hex
+
+[light]
+# Base background (pane fill, status bar)
+background = "white"
+# Pane highlights, titles, table headers (also link underline fallback)
+accent = "blue"
+# Muted text, borders, separators
+dim = "gray"
+# Active-pane border
+focused = "blue"
+# Selected row highlight (nav + list)
+selected = "gray"
+# Nav top-level parent entries
+top = "blue"
+
+# Markdown heading colors
+h1 = "blue"
+h2 = "blue"
+h3 = "magenta"
+# Inline code and code blocks
+code = "green"
+# Link text (underlined)
+link = "blue"
+# Blockquotes
+quote = "gray"
+
+[dark]
+# Base background (pane fill, status bar)
+background = "black"
+# Pane highlights, titles, table headers
+accent = "yellow"
+# Muted text, borders, separators
+dim = "darkgray"
+# Active-pane border
+focused = "yellow"
+# Selected row highlight (nav + list)
+selected = "darkgray"
+# Nav top-level parent entries
+top = "yellow"
+
+# Markdown heading colors
+h1 = "yellow"
+h2 = "yellow"
+h3 = "blue"
+# Inline code and code blocks
+code = "yellow"
+# Link text (underlined)
+link = "yellow"
+# Blockquotes
+quote = "gray"
