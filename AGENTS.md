@@ -20,6 +20,7 @@ This repository's `main` branch is DESIGN-ONLY: markdown recording intent, roadm
 | File        | Role                                                                                              |
 | ----------- | ------------------------------------------------------------------------------------------------- |
 | `SPEC.md`   | Intent summary — 3 specs, each: goal + what + decisions                                           |
+| `PLAN.md`   | Roadmap + per-branch progress — `##` = spec, `###` = branch (rust/go/cpp), phases with checkboxes |
 | `DESIGN.md` | Design detail — 3 specs, each: behavior + decisions. Design authority; changes land here first    |
 | `AGENTS.md` | This file — repo structure + workflow for agents                                                  |
 | `README.md` | Human-facing — repo layout, usage, build & run                                                    |
