@@ -835,7 +835,7 @@ impl App {
     fn push_sort(&mut self, level: &str, reverse: bool) {
         self.sort_stack.retain(|(l, _)| l != level);
         self.sort_stack.insert(0, (level.to_string(), reverse));
-        self.sort_stack.truncate(3);
+        self.sort_stack.truncate(2);
         self.rebuild_list();
         let shown: Vec<String> = self
             .sort_stack

@@ -435,7 +435,7 @@ impl Config {
             self.db_path = resolve_config_path(&v, &self.config_dir);
         }
         if let Some(v) = raw.sort {
-            self.sort = v.into_iter().take(3).collect();
+            self.sort = v.into_iter().take(2).collect();
         }
         self.foldlevel = raw.foldlevel;
         self.reading_width = raw.reading_width.unwrap_or(0);
@@ -702,9 +702,9 @@ mod advanced_tests {
         let r = load_from("sort = [\"a\", \"b\", \"c\", \"d\"]\n", "config.toml").unwrap();
         let mut cfg = Config::load();
         if let Some(v) = r.sort {
-            cfg.sort = v.into_iter().take(3).collect();
+            cfg.sort = v.into_iter().take(2).collect();
         }
-        assert_eq!(cfg.sort.len(), 3);
+        assert_eq!(cfg.sort.len(), 2);
     }
 
     #[test]
