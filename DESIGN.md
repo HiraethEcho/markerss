@@ -41,6 +41,7 @@ Top entries and their fold behavior:
 | Read Later | no | — (items flagged read_later) |
 | Saved | no | — (items flagged saved) |
 | Favourite | no (aggregate) | items of all favourited feeds (like Read Later/Saved) |
+| Lazy | no (aggregate) | items of all lazy feeds |
 | Categories | yes | category tree → feeds |
 | Tags | yes | per-tag entries, each foldable → feeds carrying it |
 | Feeds | yes | all feeds (flat) |
@@ -86,6 +87,7 @@ Directional movement: `h`/`q`/`esc` = LEFT, `l`/`enter` = RIGHT (+ arrow keys `�
 - List `j/k` moves selection — **does not mark read**. `l`/`enter` opens the article (marks read, clears read-later).
 - List `n`/`p` — mark current read, jump to next/prev unread (no reorder).
 - **List semantics**: the list is a snapshot taken at startup / manual refresh (`R`) / scope change. Auto fetch (`r`/startup/interval) only **appends new unread items** — read items stay in place, never reordered, until manual refresh or restart.
+- **Flag toggles never rebuild the list**: `L`/`S`/`u`/`a`/`A` mutate the in-memory snapshot in place — current order + selection stay. Flagged items leave the view only on refresh, scope change, or sort change.
 - **Read-later lifecycle**: marking read-later also marks the item unread; opening/reading an item clears its read-later flag.
 - Article pane: preview (list focus) shows the full summary; article mode shows summary + content (blank only when a feed has neither — `enter` fetches); `n/p` parent navigation (article→list cursor, list→nav cursor); `j/k` scroll; ctrl+u/ctrl+d half-page.
 
@@ -93,7 +95,7 @@ Directional movement: `h`/`q`/`esc` = LEFT, `l`/`enter` = RIGHT (+ arrow keys `�
 
 - SQLite database at `$XDG_CACHE_HOME/markerss/markerss.db` — items + content + flags; WAL journal + `(feed_url, read)` / `(read_later)` / `(saved)` indexes.
 - Items keyed `(feed_url, guid)`; flags and content preserved across refresh.
-- Per-item boolean flags: `read`, `read_later`, `saved` — independent. **Favourite is feed-level** (stored in the urls file as `!favourite` marker, not in the DB).
+- Per-item boolean flags: `read`, `read_later`, `saved` — independent. **Favourite is feed-level** (stored in the urls file as `!favourite` marker, not in the DB). **Lazy is feed-level** (`!lazy` marker in the urls file).
 - **Feed-provided content is kept on refresh** (arrives with the feed — no extra request); full-article fetch (readability) may replace it.
 - Markdown generated ONLY at export time, never stored.
 - Configurable TTL: startup purge of fetched content older than `cache_ttl_days` — **`saved` items exempt**.
@@ -121,12 +123,13 @@ Directional movement: `h`/`q`/`esc` = LEFT, `l`/`enter` = RIGHT (+ arrow keys `�
 ### Export
 
 - `e` → prompt with the **default path prefilled** as placeholder (`$XDG_DATA_HOME/markerss/<category>/<slug>.md`, uncategorized → root); enter accepts, or type a custom path.
+- `E` (nav pane only) → append list of all `saved` items as `title url summary` lines to `export_saved_path` (default `$XDG_DATA_HOME/markerss/saved.md`); prompt prefilled, append mode.
 - Markdown: YAML frontmatter (title, link, date, feed) + full content.
 
 ### Refresh
 
-- **Partial** (`r`): fetch new items for the **current scope's feeds only** (upsert — never removes read items; new unread appended to the list top).
-- **Full** (`R`): fetch every feed, rebuild the list snapshot, re-apply read state (unread only in All Unread).
+- **Partial** (`r`): fetch new items for the **current scope's feeds only** (upsert — never removes read items; new unread appended to the list top). Auto `r`-style refreshes (startup/interval) skip lazy feeds; manual `r`/`R` always include them.
+- **Full** (`R`): fetch every feed (incl. lazy), rebuild the list snapshot, re-apply read state (unread only in All Unread).
 - Auto fetch on startup (background, non-blocking) + optional interval — both behave like partial refresh.
 
 ### Paths (XDG)
@@ -166,6 +169,8 @@ Directional movement: `h`/`q`/`esc` = LEFT, `l`/`enter` = RIGHT (+ arrow keys `�
 | gg | nav+list+article | jump top |
 | yy/yn/yp/ys/yc | list+nav | copy item url / title / feed url / summary / full content (markdown) |
 | L / S | list+article | toggle read-later / saved (again to cancel; L marks unread) |
+| L | nav | toggle feed lazy (`!lazy` marker; feeds skipped by auto refresh) |
+| E | nav | append saved-article list (`title url summary`) to export_saved_path (prompt) |
 | t | nav | cycle nav preset |
 | r / R | global | partial refresh (current scope) / full refresh (rebuild) |
 | i / x | global | import / export OPML |
@@ -191,6 +196,8 @@ Advanced keys (planned, unbound or remapped — see Advanced): `gg/G`, `Ctrl+f/b
 | Rendering | strategy per-language; shared behavioral contract | each branch picks its own pipeline | 2026-08 |
 | Paths | XDG config/cache/data; config + urls separate files | Platform convention; subscriptions ≠ app config | 2026-08 |
 | Export target | `$XDG_DATA_HOME/markerss/<category>/<slug>.md` | Per-category archive; configurable | 2026-08 |
+| List stability | flag toggles (`L`/`S`/`u`/`a`/`A`) update snapshot in place, no rebuild | stable selection; view changes only on refresh/scope/sort | 2026-08 |
+| Saved-list export | `E` (nav) appends `title url summary` lines to `export_saved_path` | quick plain-text archive | 2026-08 |
 
 ## Config
 
@@ -199,6 +206,7 @@ Advanced keys (planned, unbound or remapped — see Advanced): `gg/G`, `Ctrl+f/b
 - Keys:
   - `cache_ttl_days` — startup purge of fetched content older than N days.
   - `export_dir` — export location (default `$XDG_DATA_HOME/markerss`).
+  - `export_saved_path` — saved-list export target for `E` (default `$XDG_DATA_HOME/markerss/saved.md`); `~` expands.
   - `pane_ratio` — three-pane widths, e.g. `[0.15, 0.15, 0.7]`.
   - `theme` — standalone theme file (colors), separate from config.
   - `browser` — which browser to open (default: `xdg-open`).
@@ -209,17 +217,18 @@ Advanced keys (planned, unbound or remapped — see Advanced): `gg/G`, `Ctrl+f/b
   - `fetch_timeout` — per-request timeout.
   - `max_items_per_feed` — cap items kept per feed.
   - `reading_width` — max article body columns (0 = fill pane).
-  - `keybindings` — map of action → key string or list (single keys, combos like `gg`, specials like `<enter>`), in config.toml `[keybindings]` or standalone `keybindings.toml` (replaces the config map). Combos match via a prefix buffer; ctrl chords are never rebindable. Actions: open back quit refresh refresh_all toggle_read mark_read mark_all_read (alias mark_read_all) export browser favourite read_later saved new_feed delete rename edit_tags help focus_next focus_prev search jump_top jump_bottom next_unread prev_unread parent_next parent_prev copy_item_url copy_item_title copy_feed_url copy_item_summary copy_item_content sort_time sort_title sort_feed sort_unread sort_*_rev cycle_preset import_opml export_opml.
+  - `keybindings` — map of action → key string or list (single keys, combos like `gg`, specials like `<enter>`), in config.toml `[keybindings]` or standalone `keybindings.toml` (replaces the config map). Combos match via a prefix buffer; ctrl chords are never rebindable. Actions: open back quit refresh refresh_all toggle_read mark_read mark_all_read (alias mark_read_all) export export_saved browser favourite read_later saved new_feed delete rename edit_tags help focus_next focus_prev search jump_top jump_bottom next_unread prev_unread parent_next parent_prev copy_item_url copy_item_title copy_feed_url copy_item_summary copy_item_content sort_time sort_title sort_feed sort_unread sort_*_rev cycle_preset import_opml export_opml.
+  - `markers` — `[markers]` table, literal strings rendered next to rows: `saved`/`later` (list + article header), `favourite`/`lazy` (nav feed rows). Defaults `[S]` `[L]` `[F]` `[Z]`; nerd-font glyphs (no brackets) supported.
   - `default_view` — startup scope, e.g. `Feed:<url>` / `Category:<name>`.
 - Read at startup; defaults + XDG fallbacks when keys absent. No hot-reload in MVP.
 
 ### Nav Pane Presets
 
-- Each preset = array of nav sections; one default full preset: `[Unread, Read Later, Favourite, Categories, Tags, Saved]`.
+- Each preset = array of nav sections; one default full preset: `[Unread, Read Later, Favourite, Categories, Tags, Saved, Lazy]`.
 - `nav_presets` replaces the list; first entry is the initial preset; `t` cycles through all presets (wrap).
-- Valid sections: `Unread`, `Read Later`, `Favourite`, `Saved`, `Categories` (tree), `Tags`, `Feeds`.
+- Valid sections: `Unread`, `Read Later`, `Favourite`, `Saved`, `Lazy`, `Categories` (tree), `Tags`, `Feeds`.
 - `No Category` renders automatically at the end of the Categories section.
-- Section rendering: single-node sections (Unread / Read Later / Saved / Favourite) render as the node itself; list sections (Categories / Tags / Feeds) render a foldable header row + children.
+- Section rendering: single-node sections (Unread / Read Later / Saved / Favourite / Lazy) render as the node itself; list sections (Categories / Tags / Feeds) render a foldable header row + children.
 
 ### Decisions
 
@@ -240,6 +249,7 @@ Advanced keys (planned, unbound or remapped — see Advanced): `gg/G`, `Ctrl+f/b
 - **Favourite = feed-level**: `f` on a nav feed row toggles the feed's favourite; marker persisted in the urls file; Favourite node lists favourited feeds (category-tree presentation).
 - **Read Later / Saved = item-level**: `L` / `S` in the list or article view toggle (again to cancel); nodes aggregate flagged items across feeds (All Unread pattern); independent, item can carry both.
 - **Read-later lifecycle**: `L` also marks the item unread; opening/reading an item clears its read-later flag.
+- **Lazy feeds**: `!lazy` marker in the urls file; `L` on a nav feed row toggles it (list/article `L` stays read-later). Lazy section aggregates them. Auto refresh (startup + interval) skips lazy feeds; manual `r` (current scope) and `R` (full) pull them.
 - `saved` = items kept in DB without markdown; exempt from TTL cleanup.
 
 ### Tags
@@ -260,6 +270,8 @@ Advanced keys (planned, unbound or remapped — see Advanced): `gg/G`, `Ctrl+f/b
 | Saved | kept in DB, exempt from TTL cleanup, no markdown | keep without export | 2026-08 |
 | Tags placement | tags list in nav pane (below Categories) | second nav region, not new pane | 2026-08 |
 | Tag storage | per-feed in urls file only | queryable; no item tags | 2026-08 |
+| Lazy | feed-level `!lazy` marker; Lazy nav section; auto refresh skips, manual r/R pull | bandwidth control; feeds fetched on demand | 2026-08 |
+| Markers | `[markers]` config, literal strings (ASCII `[S]` or nerd-font glyphs) | user-visible row status, themable | 2026-08 |
 
 ## Article Polish
 

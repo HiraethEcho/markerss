@@ -19,14 +19,14 @@ Each branch rebases on main and implements all five specs, in order MVP → Conf
 `$XDG_CONFIG_HOME/markerss/urls` — newsboat format: `URL "custom title" category #tag1 #tag2`; quoted title = display name.
 
 ### Config
-`$XDG_CONFIG_HOME/markerss/config.toml` — JSON / JSONC / TOML / YAML (by extension; plain `config` fallback); keys `cache_ttl_days`, `export_dir`, refresh behavior.
+`$XDG_CONFIG_HOME/markerss/config.toml` — JSON / JSONC / TOML / YAML (by extension; plain `config` fallback); keys `cache_ttl_days`, `export_dir`, `export_saved_path`, `markers`, refresh behavior.
 
 ### State & Cache
 - DB: `$XDG_CACHE_HOME/markerss/markerss.db` (items + content + read flags)
-- Export: `$XDG_DATA_HOME/markerss/<category>/<slug>.md` (uncategorized → root)
+- Export: `$XDG_DATA_HOME/markerss/<category>/<slug>.md` (uncategorized → root); `E` appends saved list to `saved.md`
 
 ### Keys
-`?` in-app help. Core: nav `j/k h/l enter`, article `n/p j/k ctrl+u ctrl+d enter`, `o` browser, `e` export, `u` read toggle, `a` mark current list read, `A` mark all feeds read, `r` refresh, `d` delete, `f` link jump, `gi` image toggle, `t` nav layout toggle, `gg/G` top/end, `/` search, `Ctrl+f/b` page, `zt/zz/zb`, `{/}`, `[/]`, `space` read+next, `yy/yn/yp/ys/yc` copy (url/title/feed/summary/content), `st/sn/sf/su` sort stack + `S` reverse.
+`?` in-app help. Core: nav `j/k h/l enter`, article `n/p j/k ctrl+u ctrl+d enter`, `o` browser, `e` export, `E` saved-list export, `u` read toggle, `a` mark current list read, `A` mark all feeds read, `r` refresh, `d` delete, `F` feed favourite / fullscreen, `L` lazy (nav) / read-later (list·article), `S` saved, `t` nav layout toggle, `gg/G` top/end, `/` search, `Ctrl+f/b` page, `space` read+next, `yy/yn/yp/ys/yc` copy (url/title/feed/summary/content), `st/sn/sf/su` sort stack + `S` reverse.
 
 ## Build & Run (per branch)
 

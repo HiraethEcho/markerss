@@ -15,6 +15,8 @@ Progress per branch (rust / go / cpp). `##` = spec, `###` = branch. Each branch 
 - [x] Phase 7: Export — `e` → frontmatter + full content markdown, `<category>/<slug>.md`
 - [x] Phase 8: Cache — gzipped HTML + TTL cleanup config
 - [x] Phase 9: Polish — empty states, help bar (`?`), README usage
+- [x] Phase 10: List stability — flag toggles (`L`/`S`/`u`/`a`/`A`) update snapshot in place (no rebuild); resize redraw; input box wrap + auto height
+- [x] Phase 11: Saved-list export — `E` (nav) appends `title url summary` lines for all saved items to `export_saved_path` (`saved.md` default)
 
 MVP complete — pending user review + archive.
 
@@ -50,6 +52,7 @@ MVP complete — pending user review + archive.
 - [x] Phase 2: Wire config — TTL purge, export path, pane widths, browser, refresh interval, fetch timeout, max items
 - [x] Phase 3: Nav presets — one full default (`[Unread, Read Later, Favourite, Categories, Tags, Saved]`), `nav_presets` override (first = initial), `t` cycles; No Category node; top entries highlighted
 - [x] Phase 4: default_view (`Feed:<url>` / `Category:<name>`); DB auto-migration for old schemas
+- [x] Phase 5: `export_saved_path` (saved-list export target) + `[markers]` table (`saved`/`later`/`favourite`/`lazy`)
 
 Config complete (rust).
 
@@ -75,6 +78,8 @@ Config complete (rust).
 - [x] Phase 2: Virtual nodes — Read Later / Saved aggregate items; Favourite lists favourited feeds; feed `#tags` in urls, per-tag fold + filter
 - [x] Phase 3: Saved semantics — exempt from TTL cleanup, kept in DB without markdown
 - [x] Phase 4: Read-later lifecycle — `L` marks unread; reading clears read-later; list snapshot keeps read items until manual refresh
+- [x] Phase 5: Lazy feeds — `!lazy` marker in urls file, `L` nav toggle, Lazy nav section, auto refresh skips lazy / manual `r`/`R` pulls
+- [x] Phase 6: Custom markers — `[markers]` config (`saved`/`later`/`favourite`/`lazy`), literal strings, nerd-font ready
 
 Tags & Favorites complete (rust). No per-item tags (decided).
 

@@ -13,15 +13,15 @@ Three-pane TUI RSS reader: browse feeds, store posts as markdown on command.
 - Feed sources: newsboat `urls` format (`url "custom title" cat/subcat #tag1 #tag2`); category = slash path → nested tree (mirrors OPML folder structure); quoted title = custom display name
 - Category vs tags: each feed has exactly one category (tree placement) + 0..n `#tags` (optional); categories nest (cat/subcat), tags flat
 - Navigation: `h`/`q`/`esc` go LEFT (article→list→nav; in nav: fold, then fold parent); `l`/`enter` go RIGHT (folded entry→expand + jump to first child; expanded node/feed→list; item→article+read; article→always fetch full content)
-- Nav structure: top entries (Unread / Read Later / Favourite / Categories / Tags / Saved / Feeds / No Category) — Unread, Saved, Read Later have no fold; Categories/Tags/Favourite/Feeds/No Category fold; per-tag fold; expanding a fold jumps to its first child; left on expanded header folds, left again folds parent, top folded stays; all top entries highlighted
+- Nav structure: top entries (Unread / Read Later / Favourite / Categories / Tags / Saved / Lazy / Feeds / No Category) — Unread, Saved, Read Later have no fold; Categories/Tags/Favourite/Feeds/No Category fold; per-tag fold; expanding a fold jumps to its first child; left on expanded header folds, left again folds parent, top folded stays; all top entries highlighted
 - Reading flow: list mode → article pane shows summary only; enter article → show RSS-provided body (blank if the feed has none); enter again → always try fetching full content (even when the feed has a body)
-- List semantics: startup/manual refresh = unread snapshot; auto fetch only APPENDS new unread items (never removes read ones, no reorder); read items stay in the list until manual refresh or restart; manual refresh re-applies read state
+- List semantics: startup/manual refresh = unread snapshot; auto fetch only APPENDS new unread items (never removes read ones, no reorder); read items stay in the list until manual refresh or restart; manual refresh re-applies read state. Flag toggles (`L`/`S`/`u`/`a`/`A`) mutate the snapshot in place — no rebuild, no reorder, selection stable
 - Read-later lifecycle: marking read-later also marks unread; opening/reading an item clears read-later
 - Feed content: refresh keeps the feed-provided content in the DB (arrives with the feed); full-article fetch (readability) may replace it
-- Keys: `o` browser / `e` export (rename prompt, default path prefilled) / `u` toggle read / `a` mark current list read / `A` mark all feeds read / `N` new feed / `d` delete (x2) / `M` modify (feed custom title / category / tags) / `F` favourite in nav, fullscreen in article / `L` read-later, `S` saved (list+article) / `t` nav preset cycle / `r` partial refresh (current scope feeds) / `R` refresh all / `i`/`x` OPML / `Q` quit / `?` help
+- Keys: `o` browser / `e` export (rename prompt, default path prefilled) / `E` (nav) append saved-article list (`title url summary`) to `export_saved_path` / `u` toggle read / `a` mark current list read / `A` mark all feeds read / `N` new feed / `d` delete (x2) / `M` modify (feed custom title / category / tags) / `F` favourite in nav, fullscreen in article / `L` read-later (list+article), lazy (nav) / `S` saved (list+article) / `t` nav preset cycle / `r` partial refresh (current scope feeds) / `R` refresh all / `i`/`x` OPML / `Q` quit / `?` help
 - Category CRUD in TUI; feed CRUD
-- Export: YAML frontmatter (title/link/date/feed) + full content; default `$XDG_DATA_HOME/markerss/<category>/<slug>.md` (uncategorized → root); markdown generated only at export time
-- Storage: SQLite in `$XDG_CACHE_HOME/markerss/markerss.db` — items + content + flags (`read` / `read_later` / `saved`; favourite is feed-level in urls file); feed content + fetched content preserved across refresh; TTL cleanup exempts `saved`
+- Export: YAML frontmatter (title/link/date/feed) + full content; default `$XDG_DATA_HOME/markerss/<category>/<slug>.md` (uncategorized → root); markdown generated only at export time. `E` (nav) appends `title url summary` lines for all saved items to `saved.md`
+- Storage: SQLite in `$XDG_CACHE_HOME/markerss/markerss.db` — items + content + flags (`read` / `read_later` / `saved`; favourite + lazy are feed-level in urls file as `!favourite` / `!lazy`); feed content + fetched content preserved across refresh; TTL cleanup exempts `saved`
 - Rendering: strategy per-language; shared contract — links = underlined alt (no URL), images = `[img]`, headings bold, lists/code rendered, `<sub>/<sup>` → `~x~`/`^x^`; full-article via readability extraction
 - Paths: XDG — config (`config.toml` + `urls` files separate) in `$XDG_CONFIG_HOME`, DB in `$XDG_CACHE_HOME`, export in `$XDG_DATA_HOME`
 - Minimal MVP — no sync, no background daemon, no accounts
@@ -43,6 +43,8 @@ Three-pane TUI RSS reader: browse feeds, store posts as markdown on command.
 | Rendering | strategy per-language; shared behavioral contract | each branch picks its own pipeline | 2026-08 |
 | Paths | XDG config/cache/data; config + urls separate files | Platform convention; subscriptions ≠ app config | 2026-08 |
 | Export target | `$XDG_DATA_HOME/markerss/<category>/<slug>.md` | Per-category archive; configurable | 2026-08 |
+| List stability | flag toggles update snapshot in place (no rebuild) | stable selection; view changes only on refresh/scope/sort | 2026-08 |
+| Saved-list export | `E` (nav) appends `title url summary` to `export_saved_path` | quick plain-text archive | 2026-08 |
 
 ## Config
 
@@ -52,9 +54,9 @@ User-configurable app settings via a config file.
 ### What We're Building
 - Config file at `$XDG_CONFIG_HOME/markerss/config.toml`, separate from `urls` subscriptions file
 - Format: JSON, JSONC, TOML, or YAML — detected by extension (`.json`/`.jsonc`/`.toml`/`.yaml`/`.yml`); `config.toml` (TOML) is the default
-- Keys: `cache_ttl_days` (startup purge), `export_dir` (export location), `pane_ratio` (three-pane widths, e.g. 0.15/0.15/0.7), `theme` (standalone color file), `browser` (which browser to open), `refresh` (auto-on-startup on/off, interval), `nav_presets` (list of nav section arrays, e.g. `[["Unread", "Feeds"], ["Unread", "Later"]]`), `foldlevel` (initial nav fold depth, default open), `sort` (initial sort stack, ordered array max 3, e.g. `["unread", "time"]`; keypresses never modify config)
+- Keys: `cache_ttl_days` (startup purge), `export_dir` (export location), `export_saved_path` (saved-list target for `E`, default `saved.md`), `pane_ratio` (three-pane widths, e.g. 0.15/0.15/0.7), `theme` (standalone color file), `browser` (which browser to open), `refresh` (auto-on-startup on/off, interval), `nav_presets` (list of nav section arrays, e.g. `[["Unread", "Feeds"], ["Unread", "Later"]]`), `foldlevel` (initial nav fold depth, default open), `sort` (initial sort stack, ordered array max 3, e.g. `["unread", "time"]`; keypresses never modify config), `markers` (`[markers]` table — literal row markers `saved`/`later`/`favourite`/`lazy`, defaults `[S]` `[L]` `[F]` `[Z]`, nerd-font glyphs OK)
 - Optional: `fetch_timeout`, `max_items_per_feed`, `default_view`, `reading_width`; `keybindings` — action→key string or list (combos `gg`, specials `<enter>`), in config.toml or standalone keybindings.toml (replaces config map); combo prefix-buffer matching; ctrl chords never rebindable
-- Nav pane: multiple layout presets, each preset = array of sections; one default full preset (Unread/Read Later/Favourite/Categories/Tags/Saved); `nav_presets` replaces the list (first = initial); `t` cycles presets (wrap)
+- Nav pane: multiple layout presets, each preset = array of sections; one default full preset (Unread/Read Later/Favourite/Categories/Tags/Saved/Lazy); `nav_presets` replaces the list (first = initial); `t` cycles presets (wrap); valid sections include `Lazy`
 - Counts: every nav node shows its unread count; failed fetches mark the feed row with `!` until the next success
 - Defaults when keys absent; XDG fallbacks per spec
 - Read at startup; changes require restart (no hot-reload in MVP)
@@ -78,6 +80,7 @@ Organize beyond feeds: favourites (feed-level) and read-later/saved (item-level)
 ### What We're Building
 - **Favourite = feed-level**: `f` on a nav feed row toggles the feed's favourite (persisted in urls file); Favourite node = list of favourited feeds (same presentation as category tree)
 - **Read Later / Saved = item-level**: `L`/`S` in article view toggle per-item flags; nodes aggregate flagged items like All Unread; independent, item can carry both
+- **Lazy = feed-level**: `!lazy` marker in urls file; `L` on a nav feed row toggles it; Lazy nav node aggregates lazy feeds; auto refresh (startup + interval) skips them, manual `r`/`R` pulls
 - `saved` = kept in DB without markdown, exempt from TTL cleanup
 - Tags: per-feed only, 0..n (`#tag` in urls file) plus exactly one category; tags list in nav (below Categories); select tag → filter list to feeds carrying it; no per-item tags
 
@@ -91,6 +94,8 @@ Organize beyond feeds: favourites (feed-level) and read-later/saved (item-level)
 | Saved | kept in DB, exempt from TTL cleanup, no markdown | keep without export | 2026-08 |
 | Tags placement | tags list in nav pane (below Categories) | second nav region, not new pane | 2026-08 |
 | Tag storage | per-feed in urls file | queryable, no item tags | 2026-08 |
+| Lazy | feed-level `!lazy`; Lazy section; auto skip + manual pull | bandwidth control, on-demand fetch | 2026-08 |
+| Markers | `[markers]` literal strings (ASCII or nerd-font) | row status, user-themable | 2026-08 |
 
 ## Article Polish
 
