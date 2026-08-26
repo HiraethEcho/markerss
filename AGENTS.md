@@ -1,59 +1,53 @@
 # AGENTS
 
-This repository's `main` branch is DESIGN-ONLY: markdown recording intent, roadmap, and design. No code, no lightspec/. Runs sdd-lite: SPEC/PLAN/DESIGN, no lightspec/.
+## What this branch is
 
-## Repo Structure
+`rust-comment` is a **learning fork** of the `rust` implementation branch.
+Purpose: teach Rust to a human who knows a little C, using this real codebase
+(a TUI RSS reader) as the textbook. There is no feature development here.
 
-- `main` — design authority, language-agnostic. Five parallel specs, each a `##` section in SPEC.md / PLAN.md / DESIGN.md:
-  - `## MVP` — core three-pane TUI reader
-  - `## Config` — app settings (cache TTL, export dir, refresh)
-  - `## Tags & Favorites` — tags strip in lower nav + favorites as special category
-  - `## Article Polish` — comfortable long-form article rendering
-  - `## Advanced` — OPML mapping (nested categories, tags)
-- Implementation on parallel branches, one per language (full sdd, own AGENTS.md + lightspec/):
-  - `rust` (Rust + ratatui + feed-rs)
-  - `go` (Go + bubbletea + gofeed)
-  - `cpp` (C++ + FTXUI + libcurl, newsboat source as reference)
+- `main` — design authority (SPEC/PLAN/DESIGN). Not used on this branch; its
+  spec files were removed here on purpose. Do not re-create them.
+- `rust` — upstream implementation. **This branch must always rebase onto
+  `rust`** (`git rebase rust`) when pulling upstream changes — never merge.
+  Teaching comments are the only intended divergence; conflicts should be
+  resolved in favor of `rust`'s code plus re-applied comments.
+- This branch diverges from `rust` by carrying teaching comments.
 
-## Role of Files in main
+## Comment convention (the whole point of this branch)
 
-| File        | Role                                                                                              |
-| ----------- | ------------------------------------------------------------------------------------------------- |
-| `SPEC.md`   | Intent summary — 3 specs, each: goal + what + decisions                                           |
-| `PLAN.md`   | Roadmap + per-branch progress — `##` = spec, `###` = branch (rust/go/cpp), phases with checkboxes |
-| `DESIGN.md` | Design detail — 3 specs, each: behavior + decisions. Design authority; changes land here first    |
-| `AGENTS.md` | This file — repo structure + workflow for agents                                                  |
-| `README.md` | Human-facing — repo layout, usage, build & run                                                    |
+Every file in `src/` carries **bilingual (English + 中文) teaching comments**:
 
-## Workflow
+- `//!` module header: what the file does + which Rust concepts it demonstrates
+- `///` doc comment on every struct / enum / fn: purpose + data flow
+- `//` inline at teaching moments: ownership/move, `&`/`&mut`, `Result`/`?`,
+  `Option`, traits, closures, lifetimes, `String` vs `&str`, iterators,
+  crate-specific idioms
+- C analogies where apt (`Option<T>` ≈ NULL-check enforced by the compiler,
+  `String` ≈ `malloc`'d `char*` with auto-free, `match` ≈ exhaustive switch)
+- 中文 mirror line directly under each EN line, terse
+- For repetitive blocks: comment the pattern once, not every arm
 
-### main
+### Hard rules for agents touching src/
 
-Edit design docs on main → commit → **rebase branches only when the user asks** (never auto-rebase) → implement against DESIGN.md. Each branch implements ALL five specs, in order MVP → Config → Tags & Favorites → Article Polish → Advanced. Tick the branch's checkboxes in PLAN.md as phases complete.
+1. **Comments only unless asked otherwise.** Never reformat, rename, reorder,
+   or "improve" working code. The user reads this code to learn; churn is harm.
+2. After editing, verify zero behavior change (e.g. diff with comments
+   stripped must be identical to before) and run `cargo check`.
+3. Match the existing comment style exactly — read `src/model.rs` first as
+   the reference example.
+4. Do NOT add tests, features, deps, or refactor. If you spot a bug or
+   improvement, report it — don't fix it unasked.
 
-### dev branches
+## Build & verify
 
-SDD Workflow (default tier)
+```sh
+cargo check          # fast type-check
+cargo build --release
+cargo test           # only if tests already exist; do not write new ones
+```
 
-| Phase           | Command             |
-| --------------- | ------------------- |
-| Init (default)  | `/sdd-init`         |
-| Proposal        | `/spec`             |
-| Plan            | `/plan`             |
-| Apply           | `/build`            |
-| Test            | `/test`             |
-| Review          | `/review`           |
-| Ship            | `/ship`             |
-| Pause / handoff | `/rest`             |
-| Pickup          | `/pickup`           |
-| Archive         | `lightspec archive` |
+## Collaboration rules
 
-- New session / interrupted → `/pickup`
-- Vague request → discovery (`discovery` + `idea-refine`) before spec
-- Coding → `building` (thin slices, ponytail); testing → `test-driven-development`
-- Task self-review → `reviewing`; security-sensitive → `security-and-hardening`
-- Design updates land on `main` → `git rebase main` here before implementing
-
-## Collaboration Rules
-
-- **Never `git push` without the user's explicit approval** — local commits and rebases are fine; pushing to any remote requires a "push it" / "push" go-ahead first.
+- Never `git push` without the user's explicit approval. Local commits are fine.
+- Explain risky edits and destructive commands before executing.

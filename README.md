@@ -1,45 +1,66 @@
-# markerss
+# markerss — Rust 学习版
 
-TUI RSS reader — browse feeds in the terminal, store blog posts as markdown on command.
+TUI RSS reader — browse feeds in the terminal, store blog posts as markdown
+on command. This branch (`rust-comment`) is a **Rust learning fork**: the
+working reader plus dense bilingual (English + 中文) teaching comments on
+every file, written for someone coming from C.
 
-## Repo Layout
+# markerss — TUI RSS 阅读器
 
-`main` is design-only (sdd-lite): [SPEC.md](SPEC.md) (intent), [PLAN.md](PLAN.md) (roadmap), [DESIGN.md](DESIGN.md) (TUI design). Five parallel specs — **MVP**, **Config**, **Tags & Favorites**, **Article Polish & Enhancement**, **Advanced** — each a `##` section in all three docs.
+本分支是 **Rust 学习版**：完整可用的阅读器 + 每个文件的双语（英文+中文）
+教学注释，面向有少量 C 基础的读者。
 
-Implementation lives on parallel branches, one per language (full sdd):
-- `rust` (Rust + ratatui + feed-rs)
-- `go` (Go + bubbletea + gofeed)
-- `cpp` (C++ + FTXUI + libcurl)
+> Start with [GUIDE.md](GUIDE.md) — project overview + Rust tutorial tied to
+> this codebase. / 从 GUIDE.md 开始：项目概览 + 结合本代码库的 Rust 教程。
 
-Each branch rebases on main and implements all five specs, in order MVP → Config → Tags & Favorites → Article Polish → Advanced.
-
-## Usage
-
-### Subscriptions
-`$XDG_CONFIG_HOME/markerss/urls` — newsboat format: `URL "custom title" category #tag1 #tag2`; quoted title = display name.
-
-### Config
-`$XDG_CONFIG_HOME/markerss/config.toml` — JSON / JSONC / TOML / YAML (by extension; plain `config` fallback); keys `cache_ttl_days`, `export_dir`, `export_saved_path`, `offset`, `pane_ratio`, `markers`, refresh behavior.
-
-### State & Cache
-- DB: `$XDG_CACHE_HOME/markerss/markerss.db` (items + content + read flags)
-- Export: `$XDG_DATA_HOME/markerss/<category>/<slug>.md` (uncategorized → root); `E` appends saved list to `saved.md`
-
-### Keys
-`?` in-app help. Core: nav `j/k h/l enter`, article `n/p j/k ctrl+u ctrl+d enter`, `o` browser, `e` export, `E` saved-list export, `u` read toggle, `a` mark current list read, `A` mark all feeds read, `r` refresh, `d` delete, `F` feed favourite / fullscreen, `L` lazy (nav) / read-later (list·article), `S` saved, `t` nav layout toggle, `gg/G` top/end, `/` search, `Ctrl+f/b` page, `space` read+next, `yy/yn/yp/ys/yc` copy (url/title/feed/summary/content), `st/sn/sf/su` sort stack + `S` reverse.
-
-## Build & Run (per branch)
+## Build & Run / 构建与运行
 
 ```sh
-# rust
-git checkout rust && cargo build --release && cargo run
-
-# go
-git checkout go && go build && ./markerss
-
-# cpp
-git checkout cpp && make && ./build/markerss
+cargo run            # debug build + launch / 调试构建并启动
+cargo build --release   # optimized binary in target/release/markerss
 ```
 
-## Status
-MVP in progress — see PLAN.md.
+Config lives in `~/.config/markerss/` (`config.default.toml` and
+`theme.default.toml` are templates). Cache/data in `~/.cache/markerss/` and
+`~/.local/share/markerss/`. Supports OPML import/export.
+
+## How to read the code / 阅读顺序
+
+Files are commented so concepts build on each other. Read in this order:
+
+文件注释按概念递进编写，建议按此顺序阅读：
+
+| # | File | Lines* | What it teaches / 学习内容 |
+|---|------|--------|---------------------------|
+| 1 | `src/model.rs` | 33 | structs, `String` vs `&str`, derive |
+| 2 | `src/util.rs` | 36 | iterators, closures, shadowing |
+| 3 | `src/xdg.rs` | 21 | `Option<T>`, lazy defaults |
+| 4 | `src/clipboard.rs` | 49 | traits, byte strings, bit ops |
+| 5 | `src/opml.rs` | 223 | enums + match, error handling |
+| 6 | `src/fetch.rs` | 233 | external crates, HTTP, iterators |
+| 7 | `src/feedlist.rs` | 462 | Vec state management |
+| 8 | `src/db.rs` | 597 | rusqlite, prepared statements, `?` |
+| 9 | `src/config.rs` | 791 | serde derive, Default impl |
+| 10 | `src/ui.rs` | 701 | ratatui rendering, borrowing |
+| 11 | `src/keys.rs` | 1021 | exhaustive match, state machines |
+| 12 | `src/main.rs` | 1442 | RAII guards, threads, event loop |
+
+\* code lines before comments were added
+
+Each file starts with a `//!` header listing the Rust concepts it shows;
+every function has a doc comment; tricky lines explain ownership/borrowing
+inline with C analogies. 中文注释紧跟在每行英文之下。
+
+## Comment style / 注释约定
+
+- `//!` module header — purpose + concept list
+- `///` on every struct/fn — what + data flow
+- `//` inline at teaching moments — ownership, borrows, `Result`/`?`,
+  traits, lifetimes…
+- Code is never modified for comment's sake; behavior is untouched.
+
+## Repo layout / 仓库结构
+
+- `main` branch — design docs (SPEC/PLAN/DESIGN), no code
+- this branch — implementation + teaching comments
+- Upstream: `rust` branch (clean implementation, no learning comments)
