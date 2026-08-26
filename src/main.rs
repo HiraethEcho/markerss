@@ -55,6 +55,7 @@ enum InputMode {
     EditFeedTitle,
     EditTag,
     ExportFile,
+    ExportSavedFile,
     ImportOpml,
     Search,
 }
@@ -75,6 +76,7 @@ enum PendingInput {
     },
     EditTags { url: String },
     Export { feed_url: String, guid: String },
+    ExportSaved,
 }
 
 // ─── app state ──────────────────────────────────────────────────────────────
@@ -85,6 +87,7 @@ enum Scope {
     ReadLater,
     Saved,
     Favourite,
+    Lazy,
     Category(String),
     Feed(String),
     Tag(String),
@@ -99,6 +102,7 @@ struct App {
     // nav tree
     collapsed: std::collections::HashSet<String>,
     fav_expanded: bool,
+    lazy_expanded: bool,
     preset_idx: usize,
     uncat_expanded: bool,
     tree_sel: usize,
@@ -155,6 +159,8 @@ enum TreeRow {
     Saved,
     Favourite,
     FavouriteFeed(String, String), // url, display name
+    Lazy,
+    LazyFeed(String, String), // url, display name
     Uncategorized,
     UncategorizedFeed(String, String), // url, display name
     Category(String),
@@ -178,6 +184,7 @@ impl App {
             db,
             collapsed: Default::default(),
             fav_expanded: true,
+            lazy_expanded: true,
             preset_idx: 0,
             uncat_expanded: true,
             tree_sel: 0,
@@ -265,7 +272,7 @@ impl App {
             // render as the node itself; list sections get a foldable header
             let is_node_section = matches!(
                 section.as_str(),
-                "Unread" | "Read Later" | "Saved" | "Favourite"
+                "Unread" | "Read Later" | "Saved" | "Favourite" | "Lazy"
             );
             if !is_node_section {
                 rows.push(TreeRow::Section(section.clone()));
@@ -298,6 +305,17 @@ impl App {
                     if self.fav_expanded {
                         for f in self.feeds.feeds.iter().filter(|f| f.favourite) {
                             rows.push(TreeRow::FavouriteFeed(
+                                f.url.clone(),
+                                f.display_name().to_string(),
+                            ));
+                        }
+                    }
+                }
+                "Lazy" => {
+                    rows.push(TreeRow::Lazy);
+                    if self.lazy_expanded {
+                        for f in self.feeds.feeds.iter().filter(|f| f.lazy) {
+                            rows.push(TreeRow::LazyFeed(
                                 f.url.clone(),
                                 f.display_name().to_string(),
                             ));
@@ -402,9 +420,11 @@ impl App {
             TreeRow::Category(c) => Scope::Category(c.clone()),
             TreeRow::Feed(url, _, _) => Scope::Feed(url.clone()),
             TreeRow::FavouriteFeed(url, _) => Scope::Feed(url.clone()),
+            TreeRow::LazyFeed(url, _) => Scope::Feed(url.clone()),
             TreeRow::UncategorizedFeed(url, _) => Scope::Feed(url.clone()),
             TreeRow::Tag(t) => Scope::Tag(t.clone()),
             TreeRow::Favourite => Scope::Favourite,
+            TreeRow::Lazy => Scope::Lazy,
             TreeRow::Uncategorized => Scope::AllUnread,
         };
         self.list_sel = 0;
@@ -428,10 +448,12 @@ impl App {
                 TreeRow::Category(c) => Scope::Category(c),
                 TreeRow::Feed(url, _, _) => Scope::Feed(url),
                 TreeRow::FavouriteFeed(url, _) => Scope::Feed(url),
+                TreeRow::LazyFeed(url, _) => Scope::Feed(url),
                 TreeRow::UncategorizedFeed(url, _) => Scope::Feed(url),
                 TreeRow::Tag(t) => Scope::Tag(t),
                 TreeRow::Favourite => Scope::Favourite,
-            TreeRow::Uncategorized => Scope::AllUnread,
+                TreeRow::Lazy => Scope::Lazy,
+                TreeRow::Uncategorized => Scope::AllUnread,
             };
             self.list_sel = 0;
             self.list_offset = 0;
@@ -461,6 +483,15 @@ impl App {
             Scope::Saved => items = self.db.items_with_flag("saved").unwrap_or_default(),
             Scope::Favourite => {
                 for f in self.feeds.feeds.iter().filter(|f| f.favourite) {
+                    if let Ok(list) = self.db.items_for_feed(&f.url) {
+                        for i in list {
+                            items.push((f.url.clone(), i));
+                        }
+                    }
+                }
+            }
+            Scope::Lazy => {
+                for f in self.feeds.feeds.iter().filter(|f| f.lazy) {
                     if let Ok(list) = self.db.items_for_feed(&f.url) {
                         for i in list {
                             items.push((f.url.clone(), i));
@@ -625,6 +656,9 @@ impl App {
             InputMode::EditFeedTitle => "display title (empty = default):".to_string(),
             InputMode::EditTag => "new tag name:".to_string(),
             InputMode::ExportFile => "export as (enter = default):".to_string(),
+            InputMode::ExportSavedFile => {
+                "append saved list as (enter = default):".to_string()
+            }
             InputMode::ImportOpml => "OPML file path:".to_string(),
         };
         let mut buf = String::new();
@@ -708,6 +742,7 @@ impl App {
                     tags,
                     feed_tags,
                     favourite: false,
+                    lazy: false,
                 };
                 self.feeds.upsert(feed);
                 self.save_urls();
@@ -788,6 +823,14 @@ impl App {
                 };
                 self.finish_export(std::path::PathBuf::from(path));
             }
+            InputMode::ExportSavedFile => {
+                let path = if val.is_empty() {
+                    prompt.buf.trim().to_string()
+                } else {
+                    val
+                };
+                self.finish_saved_export(std::path::PathBuf::from(path));
+            }
             InputMode::ImportOpml => {
                 if val.is_empty() {
                     self.status = "import cancelled".into();
@@ -814,7 +857,7 @@ impl App {
 
     fn delete_selected_feed(&mut self) {
         let Some((url, name)) = self.tree_rows.get(self.tree_sel).and_then(|r| match r {
-            TreeRow::Feed(u, n, _) | TreeRow::FavouriteFeed(u, n) | TreeRow::UncategorizedFeed(u, n) => {
+            TreeRow::Feed(u, n, _) | TreeRow::FavouriteFeed(u, n) | TreeRow::LazyFeed(u, n) | TreeRow::UncategorizedFeed(u, n) => {
                 Some((u.clone(), n.clone()))
             }
             _ => None,
@@ -861,9 +904,23 @@ impl App {
     /// Feed urls belonging to the current scope (for partial refresh).
     fn scope_feeds(&self) -> Vec<String> {
         match &self.scope {
-            Scope::AllUnread | Scope::ReadLater | Scope::Saved | Scope::Favourite => {
+            Scope::AllUnread | Scope::ReadLater | Scope::Saved => {
                 self.feeds.feeds.iter().map(|f| f.url.clone()).collect()
             }
+            Scope::Favourite => self
+                .feeds
+                .feeds
+                .iter()
+                .filter(|f| f.favourite)
+                .map(|f| f.url.clone())
+                .collect(),
+            Scope::Lazy => self
+                .feeds
+                .feeds
+                .iter()
+                .filter(|f| f.lazy)
+                .map(|f| f.url.clone())
+                .collect(),
             Scope::Category(c) => self
                 .feeds
                 .by_category(c)
@@ -881,19 +938,27 @@ impl App {
         }
     }
 
-    fn refresh_all(&mut self, full: bool) {
+    fn refresh_all(&mut self, full: bool, auto: bool) {
         if self.pending_refreshes > 0 {
             return;
         }
         // partial refresh targets only the feeds in the current list;
-        // full refresh targets every feed
-        let urls: Vec<String> = if full {
+        // full refresh targets every feed. Auto refresh (startup/interval)
+        // skips lazy feeds — they only refresh on manual r/R.
+        let mut urls: Vec<String> = if full {
             self.feeds.feeds.iter().map(|f| f.url.clone()).collect()
         } else {
             self.scope_feeds()
         };
+        if auto {
+            urls.retain(|u| !self.feeds.feeds.iter().any(|f| f.url == *u && f.lazy));
+        }
         if urls.is_empty() {
-            self.status = "no feeds — add subscriptions to the urls file".into();
+            self.status = if auto {
+                "no non-lazy feeds to auto-refresh".into()
+            } else {
+                "no feeds — add subscriptions to the urls file".into()
+            };
             return;
         }
         self.status = if full {
@@ -993,6 +1058,16 @@ impl App {
                 .feeds
                 .iter()
                 .any(|f| f.url == feed_url && f.has_tag(t)),
+            Scope::Favourite => self
+                .feeds
+                .feeds
+                .iter()
+                .any(|f| f.url == feed_url && f.favourite),
+            Scope::Lazy => self
+                .feeds
+                .feeds
+                .iter()
+                .any(|f| f.url == feed_url && f.lazy),
             _ => false,
         };
         if !in_scope {
@@ -1064,7 +1139,10 @@ impl App {
             for u in urls {
                 self.db.mark_all_read(&u).ok();
             }
-            self.rebuild_list();
+            // in-place — the snapshot keeps read items visible until refresh
+            for (_, i) in self.scoped_items.iter_mut() {
+                i.read = true;
+            }
             self.status = "marked all feeds read".into();
             return;
         }
@@ -1078,14 +1156,22 @@ impl App {
                 self.db.set_flag(&url, &item.guid, "read_later", false).ok();
             }
         }
-        self.rebuild_list();
+        for (_, i) in self.scoped_items.iter_mut() {
+            i.read = true;
+            i.read_later = false;
+        }
         self.status = "marked current list read".into();
     }
 
     fn toggle_read(&mut self) {
         let Some((url, item)) = self.current_item() else { return };
-        self.db.toggle_read(&url, &item.guid).ok();
-        self.rebuild_list();
+        let on = self.db.toggle_read(&url, &item.guid).unwrap_or(item.read);
+        // in-place snapshot update — no rebuild, keeps the list stable
+        for (u, i) in self.scoped_items.iter_mut() {
+            if u == &url && i.guid == item.guid {
+                i.read = on;
+            }
+        }
     }
 
     /// `<space>`: toggle the current item's read state, then move down one.
@@ -1110,6 +1196,17 @@ impl App {
             Ok(_) => self.status = format!("opened {url}"),
             Err(e) => self.status = format!("{cmd} failed: {e}"),
         }
+    }
+
+    /// Start the saved-list export flow: prompt with the default path prefilled.
+    fn start_saved_export(&mut self) {
+        let default_path = self.cfg.export_saved_path.clone();
+        self.pending = Some(PendingInput::ExportSaved);
+        self.input = Some(InputPrompt {
+            mode: InputMode::ExportSavedFile,
+            prompt: "append saved list as (enter = default):".to_string(),
+            buf: default_path.to_string_lossy().to_string(),
+        });
     }
 
     /// Start the export flow: prompt with the default filename as placeholder.
@@ -1176,6 +1273,42 @@ impl App {
         std::fs::write(path, md)
     }
 
+    /// Append `title url summary` lines for all saved items to `path`.
+    fn finish_saved_export(&mut self, path: std::path::PathBuf) {
+        let Some(PendingInput::ExportSaved) = self.pending.take() else {
+            return;
+        };
+        let items = self.db.items_with_flag("saved").unwrap_or_default();
+        if items.is_empty() {
+            self.status = "no saved items to export".into();
+            return;
+        }
+        let mut out = String::new();
+        let n = items.len();
+        for (_, item) in &items {
+            let summary = fetch::html_to_markdown(&item.summary)
+                .replace(['\n', '\r'], " ")
+                .trim()
+                .to_string();
+            let title = item.title.replace(['\n', '\r'], " ");
+            out.push_str(&format!("{title} {} {summary}\n", item.url));
+        }
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).ok();
+        }
+        match std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+            Ok(mut f) => match std::io::Write::write_all(&mut f, out.as_bytes()) {
+                Ok(_) => self.status = format!(
+                    "appended {} saved items to {}",
+                    n,
+                    path.display()
+                ),
+                Err(e) => self.status = format!("export failed: {e}"),
+            },
+            Err(e) => self.status = format!("export failed: {e}"),
+        }
+    }
+
     fn next_prev_item(&mut self, delta: isize) {
         if self.scoped_items.is_empty() {
             return;
@@ -1221,14 +1354,16 @@ fn main() -> io::Result<()> {
                 app.collapsed.insert(s.to_string());
             }
             app.fav_expanded = false;
+            app.lazy_expanded = false;
             app.uncat_expanded = false;
         }
         app.rebuild_tree();
     }
     app.db.cleanup_content(app.cfg.cache_ttl_days).ok();
-    // startup: fetch new items (append-only) — never a full refresh
+    // startup: fetch new items (append-only) — never a full refresh.
+    // Lazy feeds are skipped (manual r/R only).
     if app.cfg.refresh_on_startup {
-        app.refresh_all(false);
+        app.refresh_all(false, true);
     }
     // interval auto-refresh
     if let Some(interval_min) = app.cfg.refresh_interval_minutes {
@@ -1257,13 +1392,20 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()>
             redraw = false;
         }
         if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(k) = event::read()? {
-                // Press + Repeat (held keys auto-repeat), not Release
-                if matches!(k.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
-                    app.on_key(k.code, k.modifiers);
-                    app.recount();
+            match event::read()? {
+                Event::Key(k) => {
+                    // Press + Repeat (held keys auto-repeat), not Release
+                    if matches!(k.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+                        app.on_key(k.code, k.modifiers);
+                        app.recount();
+                    }
+                    redraw = true;
                 }
-                redraw = true;
+                Event::Resize(_w, _h) => {
+                    // terminal.draw() re-queries size each frame — just repaint
+                    redraw = true;
+                }
+                _ => redraw = true,
             }
             // swallow resize/other events, still redraw
             while event::poll(Duration::from_millis(0))? {
@@ -1291,7 +1433,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()>
                 Msg::ArticleFetched { url, guid, result } => {
                     app.handle_article_fetched(url, guid, result)
                 }
-                Msg::RefreshTick => app.refresh_all(false),
+                Msg::RefreshTick => app.refresh_all(false, true),
             }
         }
     }

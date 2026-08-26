@@ -11,6 +11,20 @@ use crate::model::Item;
 use crate::util::fmt_date;
 use crate::{App, InputMode, InputPrompt, Scope, TreeRow};
 
+/// Concatenated favourite/lazy markers for a nav feed row.
+fn feed_marks(app: &App, url: &str) -> String {
+    let mut s = String::new();
+    if let Some(f) = app.feeds.feeds.iter().find(|f| f.url == url) {
+        if f.favourite {
+            s.push_str(&app.cfg.markers.favourite);
+        }
+        if f.lazy {
+            s.push_str(&app.cfg.markers.lazy);
+        }
+    }
+    s
+}
+
 pub(crate) fn render(frame: &mut Frame, app: &mut App) {
     let [main, status_bar] = Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(frame.area());
     if app.fullscreen {
@@ -94,6 +108,17 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                 let prefix = if app.fav_expanded { "▾" } else { "▸" };
                 (format!("{prefix} Favourite ({n})"), Style::default().add_modifier(Modifier::BOLD))
             }
+            TreeRow::Lazy => {
+                let n: usize = app
+                    .feeds
+                    .feeds
+                    .iter()
+                    .filter(|f| f.lazy)
+                    .map(|f| app.unread(&f.url))
+                    .sum();
+                let prefix = if app.lazy_expanded { "▾" } else { "▸" };
+                (format!("{prefix} Lazy ({n})"), Style::default().add_modifier(Modifier::BOLD))
+            }
             TreeRow::Uncategorized => {
                 let n: usize = app
                     .feeds
@@ -107,7 +132,9 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                     Style::default().add_modifier(Modifier::BOLD),
                 )
             }
-            TreeRow::FavouriteFeed(_, name) | TreeRow::UncategorizedFeed(_, name) => {
+            TreeRow::FavouriteFeed(_, name)
+            | TreeRow::LazyFeed(_, name)
+            | TreeRow::UncategorizedFeed(_, name) => {
                 let f = app
                     .feeds
                     .feeds
@@ -118,7 +145,11 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                     .filter(|x| app.feed_errors.contains_key(&x.url))
                     .map(|_| " !")
                     .unwrap_or("");
-                (format!("  {name} ({n}){mark}"), Style::default())
+                let marks = f.map(|x| feed_marks(app, &x.url)).unwrap_or_default();
+                (
+                    format!("  {name} ({n}){marks}{mark}"),
+                    Style::default(),
+                )
             }
             TreeRow::Category(cat) => {
                 let n: usize = app
@@ -136,7 +167,12 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                 let n = app.unread(url);
                 let mark = if app.feed_errors.contains_key(url.as_str()) { " !" } else { "" };
                 (
-                    format!("{}{} ({n}){mark}", " ".repeat(*indent as usize), name),
+                    format!(
+                        "{}{} ({n}){}{mark}",
+                        " ".repeat(*indent as usize),
+                        name,
+                        feed_marks(app, url)
+                    ),
                     Style::default(),
                 )
             }
@@ -165,6 +201,7 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
                 | TreeRow::ReadLater
                 | TreeRow::Saved
                 | TreeRow::Favourite
+                | TreeRow::Lazy
                 | TreeRow::Uncategorized
         );
         let base = if is_top {
@@ -228,16 +265,19 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App) {
     for (i, (_, item)) in window {
         let read = item.read;
         let marker = if read { " " } else { "•" };
-        let flags = if item.saved && item.read_later {
-            " [SL]"
-        } else if item.saved {
-            " [S]"
-        } else if item.read_later {
-            " [L]"
+        let mut flags = String::new();
+        if item.saved {
+            flags.push_str(&app.cfg.markers.saved);
+        }
+        if item.read_later {
+            flags.push_str(&app.cfg.markers.later);
+        }
+        let flags = if flags.is_empty() {
+            String::new()
         } else {
-            ""
+            format!(" {flags}")
         };
-        let text = format!("{marker} {flags} {}", item.display_title());
+        let text = format!("{marker}{flags} {}", item.display_title());
         let mut li = ListItem::new(text);
         if i == app.list_sel {
             let style = if app.focus == 1 {
@@ -254,6 +294,7 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App) {
     let title = match &app.scope {
         Scope::AllUnread => "All Unread".to_string(),
         Scope::Favourite => "Favourite".to_string(),
+        Scope::Lazy => "Lazy".to_string(),
         Scope::ReadLater => "Read Later".to_string(),
         Scope::Saved => "Saved".to_string(),
         Scope::Category(c) => c.clone(),
@@ -330,14 +371,17 @@ fn article_header<'a>(app: &App, item: &'a Item, feed_name: &'a str) -> Text<'a>
     } else {
         "unread"
     };
-    let flags_mark = if item.saved && item.read_later {
-        " [SL]"
-    } else if item.saved {
-        " [S]"
-    } else if item.read_later {
-        " [L]"
+    let mut flags = String::new();
+    if item.saved {
+        flags.push_str(&app.cfg.markers.saved);
+    }
+    if item.read_later {
+        flags.push_str(&app.cfg.markers.later);
+    }
+    let flags_mark = if flags.is_empty() {
+        String::new()
     } else {
-        ""
+        format!(" {flags}")
     };
     let author_part = if item.author.is_empty() {
         String::new()
@@ -497,7 +541,7 @@ fn draw_article(frame: &mut Frame, area: Rect, app: &mut App) {
 
 fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
     let line = format!(
-        "{}  |  ? help  Q quit  F favourite  J/K unread  n/p parent  l/enter open  r fetch  R refresh",
+        "{}  |  ? help  Q quit  F favourite  L lazy  J/K unread  n/p parent  l/enter open  r fetch  R refresh",
         app.status
     );
     let status_fg = match app.cfg.background {
@@ -514,7 +558,7 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
     let text = Text::from(
         "Keys\n\
          ─────\n\
-         nav:   j/k move · h/l expand+descend · N new feed · D delete · M rename · F favourite\n\
+         nav:   j/k move · h/l expand+descend · N new feed · D delete · M rename · F favourite · L lazy\n\
          list:  j/k move · l/enter open · / search (enter keep, left stop) · J/K next/prev unread\n\
          article: j/k scroll · n/p parent (move list) · ctrl+u/d half page · ctrl+f/b full page\n\
          left:  h/q/esc — article→list→nav→parent\n\
@@ -522,9 +566,9 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
          jump:  gg/G top/bottom (nav+list+article)\n\
          sort:  st/sn/sf/su forward · sT/sN/sF/sU reversed — time/title/feed/unread\n\
          copy:  yy url · yn title · yp feed url · ys summary · yc full content\n\
-         global: o browser · e export · a list read · A all feeds read · u toggle read · L/S flags · r/R refresh\n\
+         global: o browser · e export · E saved-list · a list read · A all feeds read · u toggle read · L/S flags · r/R refresh\n\
          i/x OPML · t preset · tab focus · Q quit · ? help\n\n\
-         export → $XDG_DATA_HOME/markerss/<category>/<slug>.md",
+         export → $XDG_DATA_HOME/markerss/<category>/<slug>.md · saved list → saved.md",
     );
     // floating opaque window, default colors, scrollable with j/k
     let w = (area.width * 3 / 4).max(40);
@@ -547,31 +591,46 @@ fn draw_input(frame: &mut Frame, area: Rect, prompt: &InputPrompt) {
     let text = Text::from(format!("{} {}", prompt.prompt, prompt.buf));
     let block = Block::default()
         .borders(Borders::ALL)
-        .title("input (esc cancel)")
-        .style(Style::default().bg(Color::Blue));
-    if prompt.mode == InputMode::Search {
-        // search box floats under the list pane
-        let box_rect = Rect {
-            x: area.x + area.width / 6,
-            y: area.y + 1,
-            width: area.width * 2 / 3,
-            height: 3,
-        };
-        frame.render_widget(ratatui::widgets::Clear, box_rect);
-        frame.render_widget(
-            Paragraph::new(text).block(block.title("search (enter keep · esc restore)")),
-            box_rect,
-        );
-        return;
-    }
+        .title("input (esc cancel)");
+    let max_h = area.height.saturating_sub(2).max(3) as usize;
+    let inner_w = area.width.saturating_sub(8).saturating_sub(2) as usize;
+    let content = wrapped_lines(&text, inner_w).min(max_h.saturating_sub(2)).max(1);
+    let h = (content + 2).max(3) as u16;
     let box_rect = Rect {
-        x: area.x + area.width / 4,
-        y: area.y + area.height / 2,
-        width: area.width / 2,
-        height: 3,
+        x: area.x + 4,
+        y: if prompt.mode == InputMode::Search {
+            area.y + 1
+        } else {
+            area.y + area.height.saturating_sub(h) / 2
+        },
+        width: area.width.saturating_sub(8),
+        height: h,
     };
     frame.render_widget(ratatui::widgets::Clear, box_rect);
-    frame.render_widget(Paragraph::new(text).block(block), box_rect);
+    let title = if prompt.mode == InputMode::Search {
+        "search (enter keep · esc restore)"
+    } else {
+        "input (esc cancel)"
+    };
+    frame.render_widget(
+        Paragraph::new(text)
+            .wrap(ratatui::widgets::Wrap { trim: false })
+            .block(block.title(title)),
+        box_rect,
+    );
+}
+
+/// Number of lines `text` occupies when wrapped at `width` columns.
+fn wrapped_lines(text: &Text, width: usize) -> usize {
+    if width == 0 {
+        return 1;
+    }
+    let n: usize = text
+        .lines
+        .iter()
+        .map(|l| (l.width() + width - 1) / width)
+        .sum();
+    n.max(1)
 }
 
 fn pane_block<'a>(title: &'a str, focused: bool, theme: &crate::config::ThemeColors) -> Block<'a> {

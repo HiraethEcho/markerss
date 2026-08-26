@@ -15,8 +15,8 @@ use serde::Deserialize;
 use crate::xdg;
 use ratatui::style::{Color, Modifier, Style};
 
-pub const DEFAULT_NAV_PRESET: [&str; 6] =
-    ["Unread", "Read Later", "Favourite", "Categories", "Tags", "Saved"];
+pub const DEFAULT_NAV_PRESET: [&str; 7] =
+    ["Unread", "Read Later", "Favourite", "Categories", "Tags", "Saved", "Lazy"];
 
 /// Default key map: action name → key sequences (1-2 chars, or `<special>`).
 pub const DEFAULT_KEYS: &[(&str, &[&str])] = &[
@@ -30,6 +30,7 @@ pub const DEFAULT_KEYS: &[(&str, &[&str])] = &[
     ("mark_list_read", &["a"]),
     ("mark_all_read", &["A"]),
     ("export", &["e"]),
+    ("export_saved", &["E"]),
     ("browser", &["o"]),
     ("favourite", &["F"]),
     ("read_later", &["L"]),
@@ -311,6 +312,7 @@ pub fn color_from_str(s: &str) -> Option<Color> {
 struct RawConfig {
     cache_ttl_days: Option<u64>,
     export_dir: Option<String>,
+    export_saved_path: Option<String>,
     browser: Option<String>,
     refresh: Option<RefreshCfg>,
     fetch_timeout: Option<u64>,
@@ -325,6 +327,7 @@ struct RawConfig {
     foldlevel: Option<usize>,
     reading_width: Option<u64>,
     background: Option<String>,
+    markers: Option<RawMarkers>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -340,6 +343,37 @@ enum RefreshCfg {
 pub enum KeySpec {
     One(String),
     Many(Vec<String>),
+}
+
+/// Item/feed status markers, rendered next to rows. Values are literal
+/// strings — set nerd-font glyphs (no brackets) or keep `[S]`-style ASCII.
+#[derive(Debug, Clone)]
+pub struct Markers {
+    pub saved: String,
+    pub later: String,
+    pub favourite: String,
+    pub lazy: String,
+}
+
+impl Default for Markers {
+    fn default() -> Self {
+        Self {
+            saved: "[S]".into(),
+            later: "[L]".into(),
+            favourite: "[F]".into(),
+            lazy: "[Z]".into(),
+        }
+    }
+}
+
+/// Config `[markers]` table — each key optional, missing = default.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+struct RawMarkers {
+    saved: Option<String>,
+    later: Option<String>,
+    favourite: Option<String>,
+    lazy: Option<String>,
 }
 
 /// Base color scheme selected by `background` in config.
@@ -358,6 +392,7 @@ pub struct Config {
     pub db_path: PathBuf,
     pub cache_ttl_days: u64,
     pub export_dir: PathBuf,
+    pub export_saved_path: PathBuf,
     pub browser: Option<String>,
     pub refresh_on_startup: bool,
     pub refresh_interval_minutes: Option<u64>,
@@ -372,6 +407,7 @@ pub struct Config {
     pub reading_width: u64,
     pub keybindings: std::collections::HashMap<String, Vec<String>>,
     pub background: LightDark,
+    pub markers: Markers,
 }
 
 impl Config {
@@ -384,7 +420,8 @@ impl Config {
             urls_path: config_dir.join("urls"),
             db_path: cache_dir.join("markerss.db"),
             cache_ttl_days: 14,
-            export_dir: data_dir,
+            export_dir: data_dir.clone(),
+            export_saved_path: data_dir.join("saved.md"),
             browser: None,
             refresh_on_startup: true,
             refresh_interval_minutes: None,
@@ -399,6 +436,7 @@ impl Config {
             reading_width: 0,
             keybindings: default_keybindings(),
             background: LightDark::Dark,
+            markers: Markers::default(),
             config_dir: config_dir.clone(),
         };
 
@@ -414,6 +452,9 @@ impl Config {
         }
         if let Some(v) = raw.export_dir {
             self.export_dir = expand_tilde(&v);
+        }
+        if let Some(v) = raw.export_saved_path {
+            self.export_saved_path = expand_tilde(&v);
         }
         self.browser = raw.browser;
         if let Some(v) = raw.refresh {
@@ -468,6 +509,20 @@ impl Config {
             }
         }
         self.default_view = raw.default_view;
+        if let Some(m) = raw.markers {
+            if let Some(v) = m.saved {
+                self.markers.saved = v;
+            }
+            if let Some(v) = m.later {
+                self.markers.later = v;
+            }
+            if let Some(v) = m.favourite {
+                self.markers.favourite = v;
+            }
+            if let Some(v) = m.lazy {
+                self.markers.lazy = v;
+            }
+        }
     }
 }
 
@@ -618,6 +673,21 @@ mod tests {
     fn json_by_extension() {
         let r = load_from(r#"{"export_dir": "/data/out"}"#, "config.json").unwrap();
         assert_eq!(r.export_dir.as_deref(), Some("/data/out"));
+    }
+
+    #[test]
+    fn markers_and_saved_path_parsed() {
+        let r = load_from(
+            "export_saved_path = \"~/saved.md\"\n[markers]\nsaved = \"\\uF02E\"\nlater = \"[L]\"\nfavourite = \"\\uF005\"\nlazy = \"\\uF186\"\n",
+            "config",
+        )
+        .unwrap();
+        assert_eq!(r.export_saved_path.as_deref(), Some("~/saved.md"));
+        let m = r.markers.unwrap();
+        assert_eq!(m.saved.as_deref(), Some("\u{f02e}"));
+        assert_eq!(m.later.as_deref(), Some("[L]"));
+        assert_eq!(m.favourite.as_deref(), Some("\u{f005}"));
+        assert_eq!(m.lazy.as_deref(), Some("\u{f186}"));
     }
 
     #[test]

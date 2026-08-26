@@ -25,6 +25,8 @@ pub struct Feed {
     pub feed_tags: Vec<String>,
     /// Favourite flag (`!favourite` marker).
     pub favourite: bool,
+    /// Lazy flag (`!lazy` marker) — skipped by auto refresh (startup/interval).
+    pub lazy: bool,
 }
 
 impl Feed {
@@ -65,6 +67,9 @@ impl Feed {
         }
         if self.favourite {
             line.push_str(" !favourite");
+        }
+        if self.lazy {
+            line.push_str(" !lazy");
         }
         line
     }
@@ -236,6 +241,7 @@ pub fn parse_line(line: &str) -> Option<Feed> {
     let mut categories = Vec::new();
     let mut feed_tags = Vec::new();
     let mut favourite = false;
+    let mut lazy = false;
     for w in words {
         if let Some(t) = w.strip_prefix('#') {
             if !t.is_empty() {
@@ -243,6 +249,8 @@ pub fn parse_line(line: &str) -> Option<Feed> {
             }
         } else if w == "!favourite" {
             favourite = true;
+        } else if w == "!lazy" {
+            lazy = true;
         } else {
             categories.push(w);
         }
@@ -255,6 +263,7 @@ pub fn parse_line(line: &str) -> Option<Feed> {
         tags: categories,
         feed_tags,
         favourite,
+        lazy,
     })
 }
 
@@ -305,18 +314,19 @@ mod tests {
 
     #[test]
     fn feed_tags_and_favourite() {
-        let f = parse_line(r#"https://x.com/feed.xml "T" blog #tech #rust !favourite"#).unwrap();
+        let f = parse_line(r#"https://x.com/feed.xml "T" blog #tech #rust !favourite !lazy"#).unwrap();
         assert_eq!(f.tags, vec!["blog"]);
         assert_eq!(f.feed_tags, vec!["tech", "rust"]);
         assert!(f.favourite);
+        assert!(f.lazy);
         assert!(f.has_tag("tech"));
         assert!(!f.has_tag("blog"));
     }
 
     #[test]
     fn roundtrip_tags_favourite() {
-        let f = parse_line(r#"https://x.com/f "~N" cat #t1 !favourite"#).unwrap();
-        assert_eq!(f.to_line(), r#"https://x.com/f "~N" cat #t1 !favourite"#);
+        let f = parse_line(r#"https://x.com/f "~N" cat #t1 !favourite !lazy"#).unwrap();
+        assert_eq!(f.to_line(), r#"https://x.com/f "~N" cat #t1 !favourite !lazy"#);
     }
 
     #[test]
@@ -430,6 +440,7 @@ mod feed_title_tests {
             tags: vec![],
             feed_tags: vec![],
             favourite: false,
+            lazy: false,
         };
         assert_eq!(f.display_name(), "X Blog");
     }
@@ -444,6 +455,7 @@ mod feed_title_tests {
             tags: vec![],
             feed_tags: vec![],
             favourite: false,
+            lazy: false,
         };
         assert_eq!(f.display_name(), "My Name");
     }

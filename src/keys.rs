@@ -19,6 +19,7 @@ pub(crate) enum Action {
     MarkAllRead,
     ToggleReadNext,
     Export,
+    ExportSaved,
     Browser,
     Favourite,
     ReadLater,
@@ -62,6 +63,7 @@ impl Action {
             "mark_all_read" => Action::MarkAllRead,
             "toggle_read_next" => Action::ToggleReadNext,
             "export" => Action::Export,
+            "export_saved" => Action::ExportSaved,
             "browser" => Action::Browser,
             "favourite" => Action::Favourite,
             "read_later" => Action::ReadLater,
@@ -169,20 +171,25 @@ impl App {
             Action::Open => self.go_right(),
             Action::Back => self.go_left(),
             Action::Quit => self.running = false,
-            Action::Refresh => self.refresh_all(false),
-            Action::RefreshAll => self.refresh_all(true),
+            Action::Refresh => self.refresh_all(false, false),
+            Action::RefreshAll => self.refresh_all(true, false),
             Action::ToggleRead => self.toggle_read(),
             Action::MarkListRead => self.mark_all_read(false),
             Action::MarkAllRead => self.mark_all_read(true),
             Action::ToggleReadNext if self.focus == 1 => self.toggle_read_and_next(),
             Action::Export => self.start_export(),
+            Action::ExportSaved if self.focus == 0 => self.start_saved_export(),
             Action::Browser => self.open_browser(),
             Action::Favourite => match self.focus {
                 0 => self.toggle_favourite_feed(),
                 2 => self.fullscreen = !self.fullscreen,
                 _ => {}
             },
-            Action::ReadLater if self.focus >= 1 => self.toggle_item_flag("read_later"),
+            Action::ReadLater => match self.focus {
+                0 => self.toggle_lazy_feed(),
+                _ if self.focus >= 1 => self.toggle_item_flag("read_later"),
+                _ => {}
+            },
             Action::Saved if self.focus >= 1 => self.toggle_item_flag("saved"),
             Action::NewFeed if self.focus == 0 => self.start_input(InputMode::AddUrl),
             Action::Delete if self.focus == 0 => {
@@ -197,6 +204,7 @@ impl App {
                         .map(|r| match r {
                             TreeRow::Feed(_, n, _)
                             | TreeRow::FavouriteFeed(_, n)
+                            | TreeRow::LazyFeed(_, n)
                             | TreeRow::UncategorizedFeed(_, n) => n.clone(),
                             _ => String::new(),
                         })
@@ -210,6 +218,7 @@ impl App {
                     Some(TreeRow::Tag(_)) => self.start_input(InputMode::EditTag),
                     Some(TreeRow::Feed(url, _, _))
                     | Some(TreeRow::FavouriteFeed(url, _))
+                    | Some(TreeRow::LazyFeed(url, _))
                     | Some(TreeRow::UncategorizedFeed(url, _)) => {
                         self.pending = Some(crate::PendingInput::EditTags { url: url.clone() });
                         self.start_input(InputMode::EditFeedTitle);
@@ -219,7 +228,7 @@ impl App {
             }
             Action::EditTags if self.focus == 0 => {
                 let Some(url) = self.tree_rows.get(self.tree_sel).and_then(|r| match r {
-                    TreeRow::Feed(u, _, _) | TreeRow::FavouriteFeed(u, _) | TreeRow::UncategorizedFeed(u, _) => Some(u.clone()),
+                    TreeRow::Feed(u, _, _) | TreeRow::FavouriteFeed(u, _) | TreeRow::LazyFeed(u, _) | TreeRow::UncategorizedFeed(u, _) => Some(u.clone()),
                     _ => None,
                 }) else {
                     return;
@@ -312,7 +321,7 @@ impl App {
             Action::CopyFeedUrl => {
                 let url = match self.focus {
                     0 => self.tree_rows.get(self.tree_sel).and_then(|r| match r {
-                        TreeRow::Feed(u, _, _) | TreeRow::FavouriteFeed(u, _) | TreeRow::UncategorizedFeed(u, _) => Some(u.clone()),
+                        TreeRow::Feed(u, _, _) | TreeRow::FavouriteFeed(u, _) | TreeRow::LazyFeed(u, _) | TreeRow::UncategorizedFeed(u, _) => Some(u.clone()),
                         _ => None,
                     }),
                     _ => self.current_item().map(|(u, _)| u),
@@ -478,7 +487,7 @@ impl App {
     }
     fn toggle_favourite_feed(&mut self) {
         let Some(url) = self.tree_rows.get(self.tree_sel).and_then(|r| match r {
-            TreeRow::Feed(u, _, _) | TreeRow::FavouriteFeed(u, _) | TreeRow::UncategorizedFeed(u, _) => Some(u.clone()),
+            TreeRow::Feed(u, _, _) | TreeRow::FavouriteFeed(u, _) | TreeRow::LazyFeed(u, _) | TreeRow::UncategorizedFeed(u, _) => Some(u.clone()),
             _ => None,
         }) else {
             return;
@@ -495,7 +504,32 @@ impl App {
         self.status = if new_state { "favourited".into() } else { "unfavourited".into() };
     }
 
+    /// Toggle lazy flag on the nav-selected feed (`L` in nav pane; urls-file `!lazy`).
+    fn toggle_lazy_feed(&mut self) {
+        let Some(url) = self.tree_rows.get(self.tree_sel).and_then(|r| match r {
+            TreeRow::Feed(u, _, _)
+            | TreeRow::FavouriteFeed(u, _)
+            | TreeRow::LazyFeed(u, _)
+            | TreeRow::UncategorizedFeed(u, _) => Some(u.clone()),
+            _ => None,
+        }) else {
+            return;
+        };
+        let new_state = {
+            let Some(f) = self.feeds.feeds.iter_mut().find(|f| f.url == url) else {
+                return;
+            };
+            f.lazy = !f.lazy;
+            f.lazy
+        };
+        self.save_urls();
+        self.rebuild_tree();
+        self.status = if new_state { "marked lazy".into() } else { "unmarked lazy".into() };
+    }
+
     /// Toggle read_later / saved flag on the current item.
+    /// In-place snapshot update — the list keeps its current order/selection;
+    /// flagged items leave the view only after refresh or scope change.
     fn toggle_item_flag(&mut self, flag: &str) {
         let Some((url, item)) = self.current_item() else { return };
         let on = self.db.toggle_flag(&url, &item.guid, flag).unwrap_or(false);
@@ -503,7 +537,18 @@ impl App {
             // marking read-later also marks unread
             self.db.set_read(&url, &item.guid, false).ok();
         }
-        self.rebuild_list();
+        for (u, i) in self.scoped_items.iter_mut() {
+            if u == &url && i.guid == item.guid {
+                if flag == "read_later" {
+                    i.read_later = on;
+                    if on {
+                        i.read = false;
+                    }
+                } else if flag == "saved" {
+                    i.saved = on;
+                }
+            }
+        }
     }
 
     /// Left: article→list→nav→parent in file tree.
@@ -551,6 +596,12 @@ impl App {
             TreeRow::Favourite => {
                 if self.fav_expanded {
                     self.fav_expanded = false;
+                    self.rebuild_tree();
+                }
+            }
+            TreeRow::Lazy => {
+                if self.lazy_expanded {
+                    self.lazy_expanded = false;
                     self.rebuild_tree();
                 }
             }
@@ -608,6 +659,7 @@ impl App {
             }
             TreeRow::Feed(_, _, _)
             | TreeRow::FavouriteFeed(_, _)
+            | TreeRow::LazyFeed(_, _)
             | TreeRow::UncategorizedFeed(_, _) => {
                 // jump to and fold the nearest container above this row
                 for j in (0..self.tree_sel).rev() {
@@ -626,6 +678,12 @@ impl App {
                         }
                         TreeRow::Favourite => {
                             self.fav_expanded = false;
+                            self.rebuild_tree();
+                            self.tree_sel = j;
+                            return;
+                        }
+                        TreeRow::Lazy => {
+                            self.lazy_expanded = false;
                             self.rebuild_tree();
                             self.tree_sel = j;
                             return;
@@ -670,6 +728,14 @@ impl App {
             Some(TreeRow::Favourite) => {
                 // already expanded — descend into the aggregate list
                 self.select_scope(&TreeRow::Favourite.clone());
+            }
+            Some(TreeRow::Lazy) if !self.lazy_expanded => {
+                self.lazy_expanded = true;
+                self.rebuild_tree();
+            }
+            Some(TreeRow::Lazy) => {
+                // already expanded — descend into the aggregate list
+                self.select_scope(&TreeRow::Lazy.clone());
             }
             Some(TreeRow::Uncategorized) if !self.uncat_expanded => {
                 self.uncat_expanded = true;
@@ -892,6 +958,7 @@ mod tests {
         assert_eq!(Action::from_str("open"), Some(Action::Open));
         assert_eq!(Action::from_str("refresh_all"), Some(Action::RefreshAll));
         assert_eq!(Action::from_str("mark_list_read"), Some(Action::MarkListRead));
+        assert_eq!(Action::from_str("export_saved"), Some(Action::ExportSaved));
         assert_eq!(Action::from_str("mark_all_read"), Some(Action::MarkAllRead));
         assert_eq!(Action::from_str("copy_item_summary"), Some(Action::CopyItemSummary));
         assert_eq!(Action::from_str("copy_item_content"), Some(Action::CopyItemContent));
@@ -925,6 +992,7 @@ mod tests {
         assert_eq!(m.get(&vec![KeyCode::Char('a')]), Some(&Action::MarkListRead));
         assert_eq!(m.get(&vec![KeyCode::Char('A')]), Some(&Action::MarkAllRead));
         assert_eq!(m.get(&vec![KeyCode::Char('u')]), Some(&Action::ToggleRead));
+        assert_eq!(m.get(&vec![KeyCode::Char('E')]), Some(&Action::ExportSaved));
     }
 
     #[test]

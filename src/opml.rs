@@ -138,6 +138,7 @@ fn make_feed(url: String, title: Option<String>, category: &str) -> Feed {
         },
         feed_tags: Vec::new(),
         favourite: false,
+        lazy: false,
     }
 }
 
@@ -157,8 +158,8 @@ mod tests {
 
     fn sample_file() -> File {
         let mut f = File::default();
-        f.upsert(Feed { url: "https://a.com/f".into(), title: Some("A".into()), custom_name: false, feed_title: None, tags: vec!["tech".into()], feed_tags: vec![], favourite: false });
-        f.upsert(Feed { url: "https://b.com/f".into(), title: None, custom_name: false, feed_title: None, tags: vec![], feed_tags: vec![], favourite: false });
+        f.upsert(Feed { url: "https://a.com/f".into(), title: Some("A".into()), custom_name: false, feed_title: None, tags: vec!["tech".into()], feed_tags: vec![], favourite: false, lazy: false });
+        f.upsert(Feed { url: "https://b.com/f".into(), title: None, custom_name: false, feed_title: None, tags: vec![], feed_tags: vec![], favourite: false, lazy: false });
         f
     }
 
@@ -194,9 +195,9 @@ mod tests {
     #[test]
     fn nested_import_export_roundtrip() {
         let mut f = File::default();
-        f.upsert(Feed { url: "https://a.com/f".into(), title: Some("A".into()), custom_name: false, feed_title: None, tags: vec!["tech/rust".into()], feed_tags: vec![], favourite: false });
-        f.upsert(Feed { url: "https://b.com/f".into(), title: Some("B".into()), custom_name: false, feed_title: None, tags: vec!["tech/go".into()], feed_tags: vec![], favourite: false });
-        f.upsert(Feed { url: "https://c.com/f".into(), title: None, custom_name: false, feed_title: None, tags: vec![], feed_tags: vec![], favourite: false });
+        f.upsert(Feed { url: "https://a.com/f".into(), title: Some("A".into()), custom_name: false, feed_title: None, tags: vec!["tech/rust".into()], feed_tags: vec![], favourite: false, lazy: false });
+        f.upsert(Feed { url: "https://b.com/f".into(), title: Some("B".into()), custom_name: false, feed_title: None, tags: vec!["tech/go".into()], feed_tags: vec![], favourite: false, lazy: false });
+        f.upsert(Feed { url: "https://c.com/f".into(), title: None, custom_name: false, feed_title: None, tags: vec![], feed_tags: vec![], favourite: false, lazy: false });
         let xml = export_opml(&f);
         // nested outline groups
         assert!(xml.contains("<outline text=\"tech\" title=\"tech\">\n<outline text=\"rust\" title=\"rust\">\n"));
