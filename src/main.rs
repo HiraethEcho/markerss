@@ -106,6 +106,8 @@ struct App {
     preset_idx: usize,
     uncat_expanded: bool,
     tree_sel: usize,
+    /// Viewport offset for the nav tree — sticky (same rule as list).
+    tree_offset: usize,
     tree_rows: Vec<TreeRow>,
 
     // list
@@ -188,6 +190,7 @@ impl App {
             preset_idx: 0,
             uncat_expanded: true,
             tree_sel: 0,
+            tree_offset: 0,
             tree_rows: Vec::new(),
             scope: Scope::AllUnread,
             list_sel: 0,

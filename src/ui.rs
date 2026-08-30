@@ -66,10 +66,12 @@ pub(crate) fn render(frame: &mut Frame, app: &mut App) {
     }
 }
 
-fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
+fn draw_nav(frame: &mut Frame, area: Rect, app: &mut App) {
     let mut items: Vec<ListItem> = Vec::new();
     let visible = (area.height as usize).saturating_sub(2).max(1);
-    let offset = app.tree_sel.saturating_sub(visible.saturating_sub(1));
+    let max_offset = app.tree_rows.len().saturating_sub(visible);
+    app.tree_offset = sticky_offset(app.tree_sel, app.tree_offset, visible, app.cfg.offset).min(max_offset);
+    let offset = app.tree_offset;
     let window: Vec<(usize, &TreeRow)> = app
         .tree_rows
         .iter()
@@ -229,15 +231,16 @@ fn draw_nav(frame: &mut Frame, area: Rect, app: &App) {
     );
 }
 
-/// Sticky scroll offset for the item list: the window only moves when the
-/// selection crosses an edge. Scrolling up from the bottom keeps the window
-/// still until the selection reaches the top of the window, then the window
-/// scrolls up. Scrolling down pins the selection to the bottom edge.
-fn sticky_offset(sel: usize, offset: usize, visible: usize) -> usize {
-    if sel < offset {
-        sel
-    } else if sel >= offset + visible {
-        sel - visible + 1
+/// Sticky scroll offset for nav/list: the window only moves when the
+/// selection crosses a margin edge. `margin` rows stay visible above/below
+/// the selection (vim scrolloff); margin is capped at half the window.
+/// Callers clamp the result to `len - visible`.
+fn sticky_offset(sel: usize, offset: usize, visible: usize, margin: usize) -> usize {
+    let m = margin.min(visible / 2);
+    if sel < offset + m {
+        sel.saturating_sub(m)
+    } else if sel >= offset + visible - m {
+        sel.saturating_sub(visible - m - 1)
     } else {
         offset
     }
@@ -253,7 +256,8 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App) {
     // edge — scrolling up from the bottom keeps the window still until the
     // selection reaches the top of the window, then the window scrolls up.
     let visible = (area.height as usize).saturating_sub(2).max(1);
-    app.list_offset = sticky_offset(app.list_sel, app.list_offset, visible);
+    app.list_offset = sticky_offset(app.list_sel, app.list_offset, visible, app.cfg.offset)
+        .min(app.scoped_items.len().saturating_sub(visible));
     let offset = app.list_offset;
     let window: Vec<(usize, &(String, Item))> = app
         .scoped_items
@@ -667,13 +671,13 @@ mod tests {
     #[test]
     fn sticky_offset_scrolls_down_pins_bottom() {
         // scrolling down: selection pinned to the bottom edge once the list
-        // is longer than the window
+        // is longer than the window (margin 0 = edge-pinning)
         let mut off = 0;
         for sel in 0..=25 {
-            off = sticky_offset(sel, off, 20);
+            off = sticky_offset(sel, off, 20, 0);
         }
         assert_eq!(off, 6); // 25 - 20 + 1
-        assert_eq!(sticky_offset(26, off, 20), 7);
+        assert_eq!(sticky_offset(26, off, 20, 0), 7);
     }
 
     #[test]
@@ -682,11 +686,11 @@ mod tests {
         // window still until the selection reaches the top edge (80)
         let mut off = 80;
         for sel in (80..=99).rev() {
-            off = sticky_offset(sel, off, 20);
+            off = sticky_offset(sel, off, 20, 0);
             assert_eq!(off, 80, "window must stay still at sel {sel}");
         }
         // crossing the top edge scrolls the window up
-        assert_eq!(sticky_offset(79, off, 20), 79);
+        assert_eq!(sticky_offset(79, off, 20, 0), 79);
     }
 
     #[test]
@@ -694,8 +698,27 @@ mod tests {
         // list shorter than the window: offset stays 0
         let mut off = 0;
         for sel in 0..=5 {
-            off = sticky_offset(sel, off, 20);
+            off = sticky_offset(sel, off, 20, 0);
             assert_eq!(off, 0);
         }
+    }
+
+    #[test]
+    fn sticky_offset_margin_keeps_rows_above_below() {
+        // margin 3: scrolling down stops with selection 3 rows above the
+        // bottom edge (row 16 of a 20-row window), not pinned to the edge
+        let mut off = 0;
+        for sel in 0..=25 {
+            off = sticky_offset(sel, off, 20, 3);
+        }
+        assert_eq!(off, 9); // 25 - (20 - 3 - 1)
+        // scrolling up from there keeps the window still until the margin
+        // hits the top edge, then scrolls
+        let mut off = 9;
+        for sel in (12..=25).rev() {
+            off = sticky_offset(sel, off, 20, 3);
+            assert_eq!(off, 9, "window must stay still at sel {sel}");
+        }
+        assert_eq!(sticky_offset(11, off, 20, 3), 8); // 11 - 3
     }
 }

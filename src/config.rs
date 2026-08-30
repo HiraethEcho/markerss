@@ -326,6 +326,7 @@ struct RawConfig {
     sort: Option<Vec<String>>,
     foldlevel: Option<usize>,
     reading_width: Option<u64>,
+    offset: Option<usize>,
     background: Option<String>,
     markers: Option<RawMarkers>,
 }
@@ -400,6 +401,8 @@ pub struct Config {
     pub max_items_per_feed: Option<usize>,
     pub theme_path: Option<PathBuf>,
     pub pane_ratio: [f64; 3],
+    /// Rows kept visible above/below the cursor when nav/list scrolls.
+    pub offset: usize,
     pub nav_presets: Vec<Vec<String>>,
     pub default_view: Option<String>,
     pub sort: Vec<String>,
@@ -429,6 +432,7 @@ impl Config {
             max_items_per_feed: None,
             theme_path: None,
             pane_ratio: [0.15, 0.15, 0.7],
+            offset: 3,
             nav_presets: vec![DEFAULT_NAV_PRESET.iter().map(|s| s.to_string()).collect()],
             default_view: None,
             sort: Vec::new(),
@@ -480,6 +484,9 @@ impl Config {
         }
         self.foldlevel = raw.foldlevel;
         self.reading_width = raw.reading_width.unwrap_or(0);
+        if let Some(v) = raw.offset {
+            self.offset = v;
+        }
         if let Some(b) = raw.background {
             self.background = match b.to_ascii_lowercase().as_str() {
                 "light" => LightDark::Light,
@@ -765,6 +772,12 @@ mod advanced_tests {
         let r = load_from("sort = [\"unread\", \"time\"]\nfoldlevel = 1\n", "config.toml").unwrap();
         assert_eq!(r.sort, Some(vec!["unread".to_string(), "time".to_string()]));
         assert_eq!(r.foldlevel, Some(1));
+    }
+
+    #[test]
+    fn offset_parsed() {
+        let r = load_from("offset = 5\n", "config.toml").unwrap();
+        assert_eq!(r.offset, Some(5));
     }
 
     #[test]

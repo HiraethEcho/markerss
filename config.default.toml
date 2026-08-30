@@ -45,6 +45,10 @@ refresh = true
 # Default: [0.15, 0.15, 0.7]
 pane_ratio = [0.15, 0.15, 0.7]
 
+# Rows kept visible above/below the cursor when nav/list scrolls (vim scrolloff).
+# Default: 3
+offset = 3
+
 # Nav pane presets — each is an array of sections; `t` cycles them.
 # Valid: Unread, Read Later, Favourite, Categories, Tags, Saved, Lazy, Feeds
 # Default: one preset with all sections
