@@ -209,7 +209,7 @@ Advanced keys (planned, unbound or remapped — see Advanced): `gg/G`, `Ctrl+f/b
   - `export_saved_path` — saved-list export target for `E` (default `$XDG_DATA_HOME/markerss/saved.md`); `~` expands.
   - `pane_ratio` — three-pane widths, e.g. `[0.15, 0.15, 0.7]`.
   - `theme` — standalone theme file (colors), separate from config.
-  - `browser` — which browser to open (default: `xdg-open`).
+  - `browser` — which browser to open (default: `xdg-open`); launched detached (see Browser Launch).
   - `refresh` — auto-on-startup on/off, interval (`interval_minutes`).
   - `nav_presets` — list of nav section arrays, e.g. `[["Unread", "Feeds"], ["Unread", "Later"]]`; replaces the preset list (first = initial).
   - `foldlevel` — initial fold depth of nav Categories tree (0 = all folded).
@@ -221,6 +221,13 @@ Advanced keys (planned, unbound or remapped — see Advanced): `gg/G`, `Ctrl+f/b
   - `markers` — `[markers]` table, literal strings rendered next to rows: `saved`/`later` (list + article header), `favourite`/`lazy` (nav feed rows). Defaults `[S]` `[L]` `[F]` `[Z]`; nerd-font glyphs (no brackets) supported.
   - `default_view` — startup scope, e.g. `Feed:<url>` / `Category:<name>`.
 - Read at startup; defaults + XDG fallbacks when keys absent. No hot-reload in MVP.
+
+### Browser Launch
+
+- `o` (and `f` link jump) spawn the `browser` command detached: own session (`setsid(2)`), `stdin`/`stdout`/`stderr` all → `/dev/null`.
+- Why: a chromium-family launcher prints `Opening in existing browser session.` on stdout — straight onto the TUI canvas, where ratatui's frame diff never repaints it (it diffs its own buffers and assumes those cells are unchanged). A browser left in our session/process group also dies with the terminal-hangup SIGHUP. Firefox's launcher does both for itself.
+- The launcher is reaped on a worker thread (`wait()`); a non-zero exit replaces the `opened <url>` status, so a bad `browser` value or an xdg-open without a handler is visible instead of silently "successful".
+- Terminal browsers (w3m, lynx, …) are unsupported — they need the tty we hand to `/dev/null`.
 
 ### Nav Pane Presets
 
@@ -239,6 +246,7 @@ Advanced keys (planned, unbound or remapped — see Advanced): `gg/G`, `Ctrl+f/b
 | Theme | standalone file, referenced by `theme` key | colors ≠ app settings; swappable | 2026-08 |
 | Pane ratio | `pane_ratio` key, default 0.15/0.15/0.7 | user-adjustable layout | 2026-08 |
 | Browser | `browser` key, default xdg-open | user choice | 2026-08 |
+| Browser launch | detached child: `setsid` + `/dev/null` stdio | chrome's banner corrupts the TUI; a shared session dies with the terminal | 2026-09 |
 | Nav layout | multiple presets (arrays), one full default, `t` cycles | user control | 2026-08 |
 | Reload | startup only | MVP simplicity | 2026-08 |
 
