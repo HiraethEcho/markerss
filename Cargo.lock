@@ -1620,6 +1620,7 @@ dependencies = [
  "dom_smoothie",
  "feed-rs",
  "h2md",
+ "libc",
  "quick-xml",
  "ratatui",
  "regex",

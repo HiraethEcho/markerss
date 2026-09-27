@@ -21,6 +21,7 @@ use crate::util::{escape_yaml, slugify};
 use ratatui::layout::Rect;
 
 use std::io;
+use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::Duration;
@@ -42,6 +43,8 @@ enum Msg {
     },
     ArticleFetched { url: String, guid: String, result: Result<String, String> },
     RefreshTick,
+    /// Browser launcher exited (`code` = None if killed by a signal).
+    BrowserExited { url: String, cmd: String, code: Option<i32> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1193,10 +1196,34 @@ impl App {
     }
 
     /// Open an arbitrary URL in the configured browser (fallback xdg-open).
+    ///
+    /// The child is detached (own session, no controlling terminal) with all
+    /// three stdio fds on /dev/null. A chromium-family launcher otherwise
+    /// prints "Opening in existing browser session." straight onto the TUI
+    /// canvas (ratatui diffs frames, so the garbage never gets repainted), and
+    /// a browser sharing our session/process group dies with the SIGHUP of a
+    /// terminal hangup. Firefox's launcher does both of these for itself.
     fn open_url(&mut self, url: &str) {
         let cmd = self.cfg.browser.clone().unwrap_or_else(|| "xdg-open".to_string());
-        match std::process::Command::new(&cmd).arg(url).spawn() {
-            Ok(_) => self.status = format!("opened {url}"),
+        let mut command = Command::new(&cmd);
+        command
+            .arg(url)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        detach_from_terminal(&mut command);
+        match command.spawn() {
+            Ok(mut child) => {
+                self.status = format!("opened {url}");
+                // reap the launcher off-thread and surface a real failure
+                // (bad browser name, xdg-open with no handler, …)
+                let tx = self.tx.clone();
+                let (cmd, url) = (cmd, url.to_string());
+                thread::spawn(move || {
+                    let code = child.wait().ok().and_then(|s| s.code());
+                    tx.send(Msg::BrowserExited { url, cmd, code }).ok();
+                });
+            }
             Err(e) => self.status = format!("{cmd} failed: {e}"),
         }
     }
@@ -1341,6 +1368,28 @@ impl App {
 
 // ── main ──────────────────────────────────────────────────────────────────
 
+/// Give a spawned process its own session, i.e. detach it from our controlling
+/// terminal: it then survives markerss exiting, and no SIGHUP of a terminal
+/// hangup reaches it. (Browsers that print on the shared tty are silenced
+/// separately, by the caller's /dev/null stdio.)
+#[cfg(unix)]
+fn detach_from_terminal(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: setsid(2) is async-signal-safe and touches nothing but the
+    // calling process; pre_exec runs between fork and exec in the child only.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
+#[cfg(not(unix))]
+fn detach_from_terminal(_command: &mut Command) {}
+
 fn main() -> io::Result<()> {
     let cfg = Config::load();
     let mut app = App::new(cfg);
@@ -1437,9 +1486,39 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()>
                     app.handle_article_fetched(url, guid, result)
                 }
                 Msg::RefreshTick => app.refresh_all(false, true),
+                // launcher exited — only complain if it failed and nothing
+                // newer has replaced the "opened" hint meanwhile
+                Msg::BrowserExited { url, cmd, code } => {
+                    if let Some(c) = code.filter(|c| *c != 0) {
+                        if app.status == format!("opened {url}") {
+                            app.status = format!("{cmd} exited with {c}");
+                        }
+                    }
+                }
             }
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A detached child must be its own session leader (sid == pid) — that is
+    /// what makes it outlive markerss and survive a terminal hangup.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn detached_child_is_its_own_session_leader() {
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
+            .arg(r#"read -r pid rest < /proc/self/stat; set -- $rest; [ "$pid" = "$5" ]"#)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        detach_from_terminal(&mut cmd);
+        let status = cmd.spawn().expect("spawn sh").wait().expect("wait for sh");
+        assert!(status.success(), "child should be its own session leader");
+    }
 }
 

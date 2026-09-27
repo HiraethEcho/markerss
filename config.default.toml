@@ -30,6 +30,8 @@ fetch_timeout = 30
 
 # ── browser ────────────────────────────────────────────────────────────────
 # Command used by `o` to open article URLs. None = xdg-open.
+# Launched detached (own session, /dev/null stdio): it outlives markerss and
+# never prints over the TUI. Terminal browsers (w3m, lynx, …) are not supported.
 # browser = "firefox"
 
 # ── refresh ────────────────────────────────────────────────────────────────
